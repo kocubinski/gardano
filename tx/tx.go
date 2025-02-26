@@ -3,12 +3,38 @@ package tx
 import (
 	"encoding/hex"
 	"fmt"
+	"reflect"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/kocubinski/go-cardano/address"
 	"github.com/kocubinski/go-cardano/fees"
 	"golang.org/x/crypto/blake2b"
 )
+
+var (
+	txDecMode cbor.DecMode
+	txEncMode cbor.EncMode
+)
+
+func init() {
+	// Use signedCWT struct defined in "Decoding CWT" example.
+
+	// Create TagSet (safe for concurrency).
+	tags := cbor.NewTagSet()
+	err := tags.Add(
+		cbor.TagOptions{EncTag: cbor.EncTagRequired, DecTag: cbor.DecTagRequired},
+		reflect.TypeOf(TxInputSet{}),
+		258)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create DecMode with immutable tags.
+	txDecMode, _ = cbor.DecOptions{}.DecModeWithTags(tags)
+
+	// Create EncMode with immutable tags.
+	txEncMode, _ = cbor.EncOptions{}.EncModeWithTags(tags)
+}
 
 type Tx struct {
 	_        struct{} `cbor:",toarray"`
@@ -32,7 +58,7 @@ func (t *Tx) Bytes() ([]byte, error) {
 	if err := t.CalculateAuxiliaryDataHash(); err != nil {
 		return nil, err
 	}
-	bytes, err := cbor.Marshal(t)
+	bytes, err := txEncMode.Marshal(t)
 	return bytes, err
 }
 
@@ -107,9 +133,11 @@ func (t *Tx) AddOutputs(outputs ...*TxOutput) error {
 	return nil
 }
 
+type TxInputSet []*TxInput
+
 // TxBody contains the inputs, outputs, fee and titme to live for the transaction.
 type TxBody struct {
-	Inputs            []*TxInput  `cbor:"0,keyasint"`
+	Inputs            TxInputSet  `cbor:"0,keyasint"`
 	Outputs           []*TxOutput `cbor:"1,keyasint"`
 	Fee               uint64      `cbor:"2,keyasint"`
 	TTL               uint32      `cbor:"3,keyasint,omitempty"`
@@ -126,7 +154,7 @@ func NewTxBody() *TxBody {
 
 // Bytes returns a slice of cbor Marshalled bytes.
 func (b *TxBody) Bytes() ([]byte, error) {
-	bytes, err := cbor.Marshal(b)
+	bytes, err := txEncMode.Marshal(b)
 	return bytes, err
 }
 

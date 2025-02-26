@@ -48,7 +48,7 @@ func TestKeys_Bech32(t *testing.T) {
 	pubBech32, err := bech32.Encode("addr_vk", data)
 	require.NoError(t, err)
 	require.Equal(t, vkey2Bech32, pubBech32)
-	addr, err := address.NewMainnetPaymentOnly(pub)
+	addr, err := address.NewMainnetPaymentOnlyFromPubkey(pub)
 	require.NoError(t, err)
 	require.Equal(t, addrBech32, string(addr))
 }

@@ -29,7 +29,7 @@ type Protocol struct {
 	MinUTXOValue uint `json:"minUTxOValue"`
 }
 
-// LadProtocol returns a pointer to a unmarshalled Protocol given a file path of a
+// LoadProtocol returns a pointer to a unmarshalled Protocol given a file path of a
 // protocol parameters file in the cardano-cli generated format.
 func LoadProtocol(fp string) (*Protocol, error) {
 	pByte, err := os.ReadFile(fp)

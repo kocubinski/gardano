@@ -1,6 +1,7 @@
 package address
 
 import (
+	"crypto/ed25519"
 	"fmt"
 
 	"github.com/gcash/bchutil/bech32"
@@ -22,7 +23,7 @@ func Blake2b224(data []byte) (result [Blake2b224Len]byte, err error) {
 	return
 }
 
-func NewMainnetPaymentOnly(pub []byte) (Address, error) {
+func NewMainnetPaymentOnlyFromPubkey(pub []byte) (Address, error) {
 	header := byte(0b01100001)
 	addr := []byte{header}
 	keyHash, err := Blake2b224(pub)
@@ -36,4 +37,19 @@ func NewMainnetPaymentOnly(pub []byte) (Address, error) {
 	}
 	res, err := bech32.Encode("addr", addr5Bit)
 	return Address(res), err
+}
+
+func PrivateKeyFromBech32(privBech32 string) (ed25519.PrivateKey, error) {
+	hrp, data, err := bech32.Decode(privBech32)
+	if err != nil {
+		return nil, err
+	}
+	if hrp != "addr_sk" {
+		return nil, fmt.Errorf("invalid hrp: %s", hrp)
+	}
+	privBz, err := bech32.ConvertBits(data, 5, 8, false)
+	if err != nil {
+		return nil, err
+	}
+	return ed25519.NewKeyFromSeed(privBz), nil
 }

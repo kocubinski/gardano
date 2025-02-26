@@ -12,7 +12,7 @@ import (
 type TxBuilder struct {
 	tx       *Tx
 	privs    []ed25519.PrivateKey
-	protocol protocol.Protocol
+	protocol *protocol.Protocol
 }
 
 // Sign adds a private key to create signature for witness
@@ -129,7 +129,7 @@ func (tb *TxBuilder) AddOutputs(outputs ...*TxOutput) {
 }
 
 // NewTxBuilder returns pointer to a new TxBuilder.
-func NewTxBuilder(pr protocol.Protocol, privs []ed25519.PrivateKey) *TxBuilder {
+func NewTxBuilder(pr *protocol.Protocol, privs []ed25519.PrivateKey) *TxBuilder {
 	return &TxBuilder{
 		tx:       NewTx(),
 		privs:    privs,

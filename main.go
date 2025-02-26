@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
@@ -17,23 +18,24 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	"github.com/blinklabs-io/gouroboros/protocol/common"
+	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
+	"github.com/blinklabs-io/gouroboros/protocol/localtxsubmission"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
-	"github.com/gcash/bchutil/bech32"
+	"github.com/kocubinski/go-cardano/address"
+	"github.com/kocubinski/go-cardano/protocol"
+	"github.com/kocubinski/go-cardano/tx"
 )
 
 type cliFlags struct {
 	flagset *flag.FlagSet
 
-	// Chain sync
-	useTls       bool
-	n2n          bool
-	network      string
-	networkMagic int
+	// client
+	clientAddress string
 
 	// Tx submission
-	sendAddress string
-	txIn        string
-	pparams     string
+	receiverAddress string
+	pparams         string
+	sendAmount      uint
 }
 
 func main() {
@@ -50,8 +52,14 @@ func main() {
 	var err error
 	switch command {
 	case "send-tx":
-		f.flagset.StringVar(&f.sendAddress, "send-address", "", "Address to send to")
+		f.flagset.StringVar(&f.receiverAddress, "receiver-address", "", "Address to send to")
 		f.flagset.StringVar(&f.pparams, "protocol-parameters-file", "", "Path to protocol parameters file")
+		f.flagset.UintVar(&f.sendAmount, "amount", 0, "Amount to send")
+		f.flagset.StringVar(&f.clientAddress, "address", "", "socket address for n2c communication")
+		if err := f.flagset.Parse(os.Args[2:]); err != nil {
+			fmt.Println("failed to parse flags:", err)
+			os.Exit(1)
+		}
 		err = sendTx(f)
 	case "run-node":
 		err = runNode()
@@ -69,6 +77,7 @@ func main() {
 
 var (
 	ouroborosConnection *ouroboros.Connection
+	shutdownWait        sync.WaitGroup
 	startHash           = "5baf72ec3430f0f65b5b7356d2b15720e451ac6593652bcbea4dd60a1ab99ebd"
 	startSlot           = uint64(148785568)
 )
@@ -107,30 +116,124 @@ func sendTx(f *cliFlags) error {
 	if signKeyBech32 == "" {
 		return fmt.Errorf("CARDANO_SIGNING_KEY_BECH32 is not set")
 	}
-	hrp, data, err := bech32.Decode(signKeyBech32)
+	if f.clientAddress == "" {
+		return fmt.Errorf("client address is not set")
+	}
+	if f.pparams == "" {
+		return fmt.Errorf("protocol parameters file is not set")
+	}
+	if f.sendAmount == 0 {
+		return fmt.Errorf("send amount is not set")
+	}
+	if f.receiverAddress == "" {
+		return fmt.Errorf("receiver address is not set")
+	}
+
+	priv, err := address.PrivateKeyFromBech32(signKeyBech32)
 	if err != nil {
-		return fmt.Errorf("failed to decode private key: %w", err)
+		return fmt.Errorf("failed to create private key: %w", err)
 	}
-	if hrp != "addr_sk" {
-		return fmt.Errorf("invalid private key")
-	}
-	// signing key is the private key portion of an ed25519 keypair
-	skey, err := bech32.ConvertBits(data, 5, 8, false)
-	if err != nil {
-		return fmt.Errorf("failed to convert bits: %w", err)
-	}
-	priv := ed25519.NewKeyFromSeed(skey)
 	pub := priv.Public().(ed25519.PublicKey)
-	data, err = bech32.ConvertBits(pub, 8, 5, true)
+	sourceAddr, err := address.NewMainnetPaymentOnlyFromPubkey(pub)
 	if err != nil {
-		return fmt.Errorf("failed to convert bits: %w", err)
+		return err
 	}
-	pubBech32, err := bech32.Encode("addr_vk", data)
+	addr, err := ledger.NewAddress(string(sourceAddr))
 	if err != nil {
-		return fmt.Errorf("failed to encode public key: %w", err)
+		return fmt.Errorf("failed to create address: %w", err)
 	}
-	fmt.Println("private key:", signKeyBech32)
-	fmt.Println("public key:", pubBech32)
+	pparams, err := protocol.LoadProtocol(f.pparams)
+	if err != nil {
+		return fmt.Errorf("failed to load protocol parameters: %w", err)
+	}
+	txBuilder := tx.NewTxBuilder(pparams, []ed25519.PrivateKey{priv})
+
+	errorChan := make(chan error)
+	go func() {
+		for {
+			err := <-errorChan
+			fmt.Printf("ERROR(async): %s\n", err)
+			// os.Exit(1)
+		}
+	}()
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	network := ouroboros.NetworkMainnet
+	client, err := createClientConnection(f.clientAddress, false)
+	if err != nil {
+		return fmt.Errorf("failed to create client connection: %w", err)
+	}
+	o, err := ouroboros.NewConnection(
+		ouroboros.WithConnection(client),
+		ouroboros.WithErrorChan(errorChan),
+		ouroboros.WithLogger(log),
+		ouroboros.WithNetwork(network),
+		ouroboros.WithLocalStateQueryConfig(localstatequery.NewConfig()),
+		ouroboros.WithLocalTxSubmissionConfig(
+			localtxsubmission.NewConfig(
+				localtxsubmission.WithSubmitTxFunc(localSubmitTxCallbackHandler),
+			),
+		),
+		ouroboros.WithKeepAlive(true),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to network: %w", err)
+	}
+	utxoRes, err := o.LocalStateQuery().Client.GetUTxOByAddress([]ledger.Address{addr})
+	if err != nil {
+		return fmt.Errorf("failed to get utxo: %w", err)
+	}
+
+	var txIn *tx.TxInput
+	minRequired := f.sendAmount + 167217 // estimate fee
+	for txId, txOut := range utxoRes.Results {
+		utxoAmount := uint(txOut.Amount())
+		fmt.Printf("tx-hash: %s, tx-idx: %d, address: %s, amount: %d\n",
+			txId.Hash.String(),
+			txId.Idx,
+			txOut.Address(),
+			utxoAmount,
+		)
+		if utxoAmount >= minRequired {
+			txIn = tx.NewTxInput(txId.Hash.String(), uint16(txId.Idx), uint(txOut.Amount()))
+			break
+		}
+	}
+	if txIn == nil {
+		return fmt.Errorf("no matching utxo found")
+	}
+	txBuilder.AddInputs(txIn)
+	txBuilder.AddOutputs(tx.NewTxOutput(address.Address(f.receiverAddress), f.sendAmount))
+	tip, err := o.ChainSync().Client.GetCurrentTip()
+	if err != nil {
+		return fmt.Errorf("failed to get current tip: %w", err)
+	}
+	era, err := o.LocalStateQuery().Client.GetCurrentEra()
+	if err != nil {
+		return fmt.Errorf("failed to get current era: %w", err)
+	}
+	txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
+	txBuilder.AddChangeIfNeeded(sourceAddr)
+	txFinal, err := txBuilder.Build()
+	if err != nil {
+		return fmt.Errorf("failed to build transaction: %w", err)
+	}
+	txBz, err := txFinal.Bytes()
+	if err != nil {
+		return fmt.Errorf("failed to get transaction bytes: %w", err)
+	}
+	// sanity check
+	_, err = ledger.NewTransactionFromCbor(uint(era), txBz)
+	if err != nil {
+		return fmt.Errorf("failed to create transaction from cbor: %w", err)
+	}
+	shutdownWait.Add(1)
+	err = o.LocalTxSubmission().Client.SubmitTx(uint16(era), txBz)
+	if err != nil {
+		return fmt.Errorf("failed to submit transaction: %w", err)
+	}
+	shutdownWait.Wait()
 
 	return nil
 }
@@ -332,6 +435,16 @@ func txSubmissionIdsRequestHandler(
 ) ([]txsubmission.TxIdAndSize, error) {
 	fmt.Printf("txRequest: blocking=%t count=%d size=%d\n", blocking, count, size)
 	return []txsubmission.TxIdAndSize{}, nil
+}
+
+func localSubmitTxCallbackHandler(
+	ctx localtxsubmission.CallbackContext,
+	msg localtxsubmission.MsgSubmitTxTransaction,
+) error {
+	fmt.Printf("localSubmitTxCallbackHandler: era=%x\n", msg.EraId)
+	time.Sleep(5 * time.Second)
+	shutdownWait.Done()
+	return nil
 }
 
 func createClientConnection(address string, useTls bool) (net.Conn, error) {
