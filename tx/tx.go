@@ -1,6 +1,7 @@
 package tx
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -28,38 +29,60 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	// err = tags.Add(
+	// 	cbor.TagOptions{EncTag: cbor.EncTagRequired, DecTag: cbor.DecTagRequired},
+	// 	reflect.TypeOf(WitnessSet{}),
+	// 	258)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// err = tags.Add(
+	// 	cbor.TagOptions{EncTag: cbor.EncTagRequired, DecTag: cbor.DecTagRequired},
+	// 	reflect.TypeOf(VKeyWitnessSet{}),
+	// 	258)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// Create DecMode with immutable tags.
-	txDecMode, _ = cbor.DecOptions{}.DecModeWithTags(tags)
+	txDecMode, err = cbor.DecOptions{}.DecModeWithTags(tags)
+	if err != nil {
+		panic(err)
+	}
 
 	// Create EncMode with immutable tags.
-	txEncMode, _ = cbor.EncOptions{}.EncModeWithTags(tags)
+	txEncMode, err = cbor.EncOptions{}.EncModeWithTags(tags)
+	if err != nil {
+		panic(err)
+	}
 }
 
 type Tx struct {
-	_        struct{} `cbor:",toarray"`
-	Body     *TxBody
-	Witness  *Witness
-	Valid    bool
-	Metadata interface{}
+	_          struct{} `cbor:",toarray"`
+	Body       TxBody
+	WitnessSet WitnessSet
+	Valid      bool
+	Metadata   interface{}
 }
 
 // NewTx returns a pointer to a new Transaction
 func NewTx() *Tx {
 	return &Tx{
-		Body:    NewTxBody(),
-		Witness: NewTXWitness(),
-		Valid:   true,
+		Body:       NewTxBody(),
+		WitnessSet: NewTXWitness(),
+		Valid:      true,
 	}
 }
 
 // Bytes returns a slice of cbor marshalled bytes
 func (t *Tx) Bytes() ([]byte, error) {
-	if err := t.CalculateAuxiliaryDataHash(); err != nil {
-		return nil, err
+	txArray := []any{
+		t.Body,
+		t.WitnessSet,
+		t.Valid,
+		nil,
 	}
-	bytes, err := txEncMode.Marshal(t)
-	return bytes, err
+	return cbor.Marshal(txArray)
 }
 
 // Hex returns hex encoding of the transacion bytes
@@ -121,41 +144,52 @@ func (t *Tx) CalculateAuxiliaryDataHash() error {
 
 // AddInputs adds the inputs to the transaction body
 func (t *Tx) AddInputs(inputs ...*TxInput) error {
-	t.Body.Inputs = append(t.Body.Inputs, inputs...)
+	t.Body.Inputs.TxIns = append(t.Body.Inputs.TxIns, inputs...)
 
 	return nil
 }
 
 // AddOutputs adds the outputs to the transaction body
-func (t *Tx) AddOutputs(outputs ...*TxOutput) error {
+func (t *Tx) AddOutputs(outputs ...TxOutput) error {
 	t.Body.Outputs = append(t.Body.Outputs, outputs...)
 
 	return nil
 }
 
-type TxInputSet []*TxInput
+type TxInputSet struct {
+	cbor.Marshaler
+	TxIns []*TxInput
+}
+
+func (txI *TxInputSet) MarshalCBOR() ([]byte, error) {
+	var buf bytes.Buffer
+	encodeHead(&buf, cborTypeTag, 258)
+	err := cbor.MarshalToBuffer(txI.TxIns, &buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
 // TxBody contains the inputs, outputs, fee and titme to live for the transaction.
 type TxBody struct {
-	Inputs            TxInputSet  `cbor:"0,keyasint"`
-	Outputs           []*TxOutput `cbor:"1,keyasint"`
-	Fee               uint64      `cbor:"2,keyasint"`
-	TTL               uint32      `cbor:"3,keyasint,omitempty"`
-	AuxiliaryDataHash []byte      `cbor:"7,keyasint,omitempty"`
+	Inputs            TxInputSet `cbor:"0,keyasint"`
+	Outputs           []TxOutput `cbor:"1,keyasint"`
+	Fee               uint64     `cbor:"2,keyasint"`
+	TTL               uint32     `cbor:"3,keyasint,omitempty"`
+	AuxiliaryDataHash []byte     `cbor:"7,keyasint,omitempty"`
 }
 
 // NewTxBody returns a pointer to a new transaction body.
-func NewTxBody() *TxBody {
-	return &TxBody{
-		Inputs:  make([]*TxInput, 0),
-		Outputs: make([]*TxOutput, 0),
+func NewTxBody() TxBody {
+	return TxBody{
+		Outputs: make([]TxOutput, 0),
 	}
 }
 
 // Bytes returns a slice of cbor Marshalled bytes.
 func (b *TxBody) Bytes() ([]byte, error) {
-	bytes, err := txEncMode.Marshal(b)
-	return bytes, err
+	return cbor.Marshal(b)
 }
 
 // Hex returns hex encoded string of the transaction bytes.
@@ -205,28 +239,51 @@ type TxOutput struct {
 	Amount  uint
 }
 
-func NewTxOutput(addr address.Address, amount uint) *TxOutput {
-	return &TxOutput{
+func NewTxOutput(addr address.Address, amount uint) TxOutput {
+	return TxOutput{
 		Address: addr,
 		Amount:  amount,
 	}
 }
 
-type Witness struct {
-	Keys []*VKeyWitness `cbor:"0,keyasint,omitempty"`
+type VKeyWitnessSet []*VKeyWitness
+
+func (v *VKeyWitnessSet) Len() int {
+	return len(*v)
+}
+
+func (v *VKeyWitnessSet) Append(witness *VKeyWitness) {
+	*v = append(*v, witness)
+}
+
+// MarshalCBOR implements cbor.Marshaler.
+func (v *VKeyWitnessSet) MarshalCBOR() ([]byte, error) {
+	if v.Len() == 0 {
+		return []byte{}, nil
+	}
+	var buf bytes.Buffer
+	encodeHead(&buf, cborTypeTag, 258)
+	var cp []*VKeyWitness
+	copy(cp, *v)
+	err := cbor.MarshalToBuffer(cp, &buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+type WitnessSet struct {
+	Keys *VKeyWitnessSet `cbor:"0,keyasint,omitempty"`
 }
 
 // NewTXWitness returns a pointer to a Witness created from VKeyWitnesses.
-func NewTXWitness(keys ...*VKeyWitness) *Witness {
+func NewTXWitness(keys ...*VKeyWitness) WitnessSet {
 	if len(keys) == 0 {
-		return &Witness{
-			Keys: make([]*VKeyWitness, 0),
-		}
+		return WitnessSet{}
 	}
 
-	return &Witness{
-		Keys: keys,
-	}
+	vkeys := VKeyWitnessSet(keys)
+	return WitnessSet{Keys: &vkeys}
 }
 
 // VKeyWitness - Witness for use with Shelley based transactions

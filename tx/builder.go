@@ -38,7 +38,7 @@ func (tb *TxBuilder) Build() (tx Tx, err error) {
 		txKeys = append(txKeys, NewVKeyWitness(publicKey, signature[:]))
 	}
 
-	tb.tx.Witness = NewTXWitness(
+	tb.tx.WitnessSet = NewTXWitness(
 		txKeys...,
 	)
 
@@ -51,13 +51,17 @@ func (tb *TxBuilder) Tx() (tx *Tx) {
 }
 
 // AddChangeIfNeeded calculates the excess change from UTXO inputs - outputs and adds it to the transaction body.
-func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) {
+func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) error {
 	// change is amount in utxo minus outputs minus fee
-	tb.tx.SetFee(tb.MinFee())
+	minFee, err := tb.MinFee()
+	if err != nil {
+		return err
+	}
+	tb.tx.SetFee(minFee)
 	totalI, totalO := tb.getTotalInputOutputs()
 
 	change := totalI - totalO - uint(tb.tx.Body.Fee)
-	tb.tx.AddOutputs(
+	return tb.tx.AddOutputs(
 		NewTxOutput(
 			addr,
 			change,
@@ -71,7 +75,7 @@ func (tb *TxBuilder) SetTTL(ttl uint32) {
 }
 
 func (tb TxBuilder) getTotalInputOutputs() (inputs, outputs uint) {
-	for _, inp := range tb.tx.Body.Inputs {
+	for _, inp := range tb.tx.Body.Inputs.TxIns {
 		inputs += inp.Amount
 	}
 	for _, out := range tb.tx.Body.Outputs {
@@ -82,25 +86,28 @@ func (tb TxBuilder) getTotalInputOutputs() (inputs, outputs uint) {
 }
 
 // MinFee calculates the minimum fee for the provided transaction.
-func (tb TxBuilder) MinFee() (fee uint) {
+func (tb TxBuilder) MinFee() (fee uint, err error) {
 	feeTx := Tx{
-		Body: &TxBody{
+		Body: TxBody{
 			Inputs:  tb.tx.Body.Inputs,
 			Outputs: tb.tx.Body.Outputs,
 			Fee:     tb.tx.Body.Fee,
 			TTL:     tb.tx.Body.TTL,
 		},
-		Witness:  tb.tx.Witness,
-		Valid:    true,
-		Metadata: tb.tx.Metadata,
+		WitnessSet: tb.tx.WitnessSet,
+		Valid:      true,
+		Metadata:   tb.tx.Metadata,
 	}
-	feeTx.CalculateAuxiliaryDataHash()
-	if len(feeTx.Witness.Keys) == 0 {
+	err = feeTx.CalculateAuxiliaryDataHash()
+	if err != nil {
+		return
+	}
+	if feeTx.WitnessSet.Keys.Len() == 0 {
 		vWitness := NewVKeyWitness(
 			make([]byte, 32),
 			make([]byte, 64),
 		)
-		feeTx.Witness.Keys = append(feeTx.Witness.Keys, vWitness)
+		feeTx.WitnessSet.Keys.Append(vWitness)
 	}
 
 	totalI, totalO := tb.getTotalInputOutputs()
@@ -119,13 +126,13 @@ func (tb TxBuilder) MinFee() (fee uint) {
 }
 
 // AddInputs adds inputs to the transaction body
-func (tb *TxBuilder) AddInputs(inputs ...*TxInput) {
-	tb.tx.AddInputs(inputs...)
+func (tb *TxBuilder) AddInputs(inputs ...*TxInput) error {
+	return tb.tx.AddInputs(inputs...)
 }
 
 // AddOutputs add outputs to the transaction body
-func (tb *TxBuilder) AddOutputs(outputs ...*TxOutput) {
-	tb.tx.AddOutputs(outputs...)
+func (tb *TxBuilder) AddOutputs(outputs ...TxOutput) error {
+	return tb.tx.AddOutputs(outputs...)
 }
 
 // NewTxBuilder returns pointer to a new TxBuilder.

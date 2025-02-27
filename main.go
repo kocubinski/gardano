@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
-	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
@@ -21,6 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/localtxsubmission"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
+	"github.com/fxamacker/cbor/v2"
 	"github.com/kocubinski/go-cardano/address"
 	"github.com/kocubinski/go-cardano/protocol"
 	"github.com/kocubinski/go-cardano/tx"
@@ -63,8 +64,13 @@ func main() {
 		err = sendTx(f)
 	case "run-node":
 		err = runNode()
-	case "key-sandbox":
-		err = keySandbox(f)
+	case "debug-tx":
+		f.flagset.StringVar(&f.clientAddress, "address", "", "socket address for n2c communication")
+		if err := f.flagset.Parse(os.Args[2:]); err != nil {
+			fmt.Println("failed to parse flags:", err)
+			os.Exit(1)
+		}
+		err = debugTx(f)
 	default:
 		fmt.Println("unknown command")
 		os.Exit(1)
@@ -82,32 +88,55 @@ var (
 	startSlot           = uint64(148785568)
 )
 
-func keySandbox(f *cliFlags) error {
-	signKeyCbor := os.Getenv("CARDANO_SIGNING_KEY_CBOR")
-	if signKeyCbor == "" {
-		return fmt.Errorf("CARDANO_SIGNING_KEY_CBOR is not set")
+func debugTx(f *cliFlags) error {
+	signKeyBech32 := os.Getenv("CARDANO_SIGNING_KEY_BECH32")
+	if signKeyBech32 == "" {
+		return fmt.Errorf("CARDANO_SIGNING_KEY_BECH32 is not set")
 	}
-	cborBz, err := hex.DecodeString(signKeyCbor)
+	txBody := tx.TxBody{
+		Inputs: tx.TxInputSet{
+			TxIns: []*tx.TxInput{
+				tx.NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
+			},
+		},
+		Outputs: make([]tx.TxOutput, 0),
+		// Outputs: []*tx.TxOutput{
+		// 	tx.NewTxOutput(address.Address("addr1v9f785wjgm4w0ky6lrjp4ecfj7dunzhql83ratqlpenqn2ssnlkjz"), 2500000),
+		// 	tx.NewTxOutput(address.Address("addr1v8hc0xl88ehea8698tjejhwjum87hsusdpne787znge7sps4x4v8v"), 166534),
+		// },
+		// Fee: 166249,
+	}
+	tx := tx.Tx{
+		Body:  txBody,
+		Valid: true,
+	}
+	txBodyBz, err := cbor.Marshal(txBody)
 	if err != nil {
-		return fmt.Errorf("failed to decode cbor: %w", err)
+		return fmt.Errorf("failed to get transaction body bytes: %w", err)
 	}
-	var bz []byte
-	if _, err := cbor.Decode(cborBz, &bz); err != nil {
-		return fmt.Errorf("failed to decode cbor: %w", err)
-	}
-	fmt.Printf("decoded: %d\n", len(bz))
-	priv := ed25519.NewKeyFromSeed(bz)
-	pub := priv.Public().(ed25519.PublicKey)
-	privKeyCbor, err := cbor.Encode(priv.Seed())
+	txBz, err := tx.Bytes()
 	if err != nil {
-		return fmt.Errorf("failed to encode private key: %w", err)
+		return fmt.Errorf("failed to get transaction bytes: %w", err)
 	}
-	pubKeyCbor, err := cbor.Encode(pub)
-	if err != nil {
-		return fmt.Errorf("failed to encode public key: %w", err)
-	}
-	fmt.Printf("private key: %x\n", privKeyCbor)
-	fmt.Printf(" public key: %x\n", pubKeyCbor)
+	fmt.Printf("txBodyBz: %x\n", txBodyBz)
+	fmt.Printf("txBz: %x\n", txBz)
+
+	// txInHash, err := hex.DecodeString("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab")
+	// if err != nil {
+	// 	return fmt.Errorf("failed to decode txInHash: %w", err)
+	// }
+	// tx2 := conway.CreateSimpleTransaction([]conway.TransactionInput{
+	// 	{
+	// 		TransactionID: conway.Hash32(txInHash),
+	// 		Index:         0,
+	// 	},
+	// }, nil, 0)
+	// tx2Bz, err := conway.SerializeTransaction(tx2)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to serialize transaction: %w", err)
+	// }
+	// fmt.Printf("tx2Bz: %x\n", tx2Bz)
+
 	return nil
 }
 
@@ -219,15 +248,23 @@ func sendTx(f *cliFlags) error {
 	if err != nil {
 		return fmt.Errorf("failed to build transaction: %w", err)
 	}
+	fmt.Println("txFinal:", txFinal)
 	txBz, err := txFinal.Bytes()
 	if err != nil {
 		return fmt.Errorf("failed to get transaction bytes: %w", err)
 	}
 	// sanity check
-	_, err = ledger.NewTransactionFromCbor(uint(era), txBz)
+	// roundTripTx, err := ledger.NewConwayTransactionFromCbor(txBz)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to create transaction from cbor: %w", err)
+	// }
+	// roundTripBz := roundTripTx.Cbor()
+	// fmt.Printf("len(roundTripBz)=%d\n", len(roundTripBz))
+	jsonBz, err := json.MarshalIndent(txFinal, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to create transaction from cbor: %w", err)
+		return fmt.Errorf("failed to json marshal transaction: %w", err)
 	}
+	fmt.Printf("txFinal:\n%s\n", jsonBz)
 	shutdownWait.Add(1)
 	err = o.LocalTxSubmission().Client.SubmitTx(uint16(era), txBz)
 	if err != nil {
