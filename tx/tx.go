@@ -143,17 +143,13 @@ func (t *Tx) CalculateAuxiliaryDataHash() error {
 }
 
 // AddInputs adds the inputs to the transaction body
-func (t *Tx) AddInputs(inputs ...*TxInput) error {
+func (t *Tx) AddInputs(inputs ...*TxInput) {
 	t.Body.Inputs.TxIns = append(t.Body.Inputs.TxIns, inputs...)
-
-	return nil
 }
 
 // AddOutputs adds the outputs to the transaction body
-func (t *Tx) AddOutputs(outputs ...TxOutput) error {
+func (t *Tx) AddOutputs(outputs ...TxOutput) {
 	t.Body.Outputs = append(t.Body.Outputs, outputs...)
-
-	return nil
 }
 
 type TxInputSet struct {
@@ -258,14 +254,10 @@ func (v *VKeyWitnessSet) Append(witness *VKeyWitness) {
 
 // MarshalCBOR implements cbor.Marshaler.
 func (v *VKeyWitnessSet) MarshalCBOR() ([]byte, error) {
-	if v.Len() == 0 {
-		return []byte{}, nil
-	}
 	var buf bytes.Buffer
 	encodeHead(&buf, cborTypeTag, 258)
-	var cp []*VKeyWitness
-	copy(cp, *v)
-	err := cbor.MarshalToBuffer(cp, &buf)
+	arr := []*VKeyWitness(*v)
+	err := cbor.MarshalToBuffer(arr, &buf)
 	if err != nil {
 		return nil, err
 	}
@@ -273,17 +265,17 @@ func (v *VKeyWitnessSet) MarshalCBOR() ([]byte, error) {
 }
 
 type WitnessSet struct {
-	Keys *VKeyWitnessSet `cbor:"0,keyasint,omitempty"`
+	VKeys *VKeyWitnessSet `cbor:"0,keyasint,omitempty"`
 }
 
 // NewTXWitness returns a pointer to a Witness created from VKeyWitnesses.
-func NewTXWitness(keys ...*VKeyWitness) WitnessSet {
-	if len(keys) == 0 {
+func NewTXWitness(vks ...*VKeyWitness) WitnessSet {
+	if len(vks) == 0 {
 		return WitnessSet{}
 	}
 
-	vkeys := VKeyWitnessSet(keys)
-	return WitnessSet{Keys: &vkeys}
+	vkeys := VKeyWitnessSet(vks)
+	return WitnessSet{VKeys: &vkeys}
 }
 
 // VKeyWitness - Witness for use with Shelley based transactions

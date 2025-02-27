@@ -61,12 +61,13 @@ func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) error {
 	totalI, totalO := tb.getTotalInputOutputs()
 
 	change := totalI - totalO - uint(tb.tx.Body.Fee)
-	return tb.tx.AddOutputs(
+	tb.tx.AddOutputs(
 		NewTxOutput(
 			addr,
 			change,
 		),
 	)
+	return nil
 }
 
 // SetTTL sets the time to live for the transaction.
@@ -102,12 +103,13 @@ func (tb TxBuilder) MinFee() (fee uint, err error) {
 	if err != nil {
 		return
 	}
-	if feeTx.WitnessSet.Keys.Len() == 0 {
+	if feeTx.WitnessSet.VKeys == nil {
+		feeTx.WitnessSet.VKeys = &VKeyWitnessSet{}
 		vWitness := NewVKeyWitness(
 			make([]byte, 32),
 			make([]byte, 64),
 		)
-		feeTx.WitnessSet.Keys.Append(vWitness)
+		feeTx.WitnessSet.VKeys.Append(vWitness)
 	}
 
 	totalI, totalO := tb.getTotalInputOutputs()
@@ -126,13 +128,13 @@ func (tb TxBuilder) MinFee() (fee uint, err error) {
 }
 
 // AddInputs adds inputs to the transaction body
-func (tb *TxBuilder) AddInputs(inputs ...*TxInput) error {
-	return tb.tx.AddInputs(inputs...)
+func (tb *TxBuilder) AddInputs(inputs ...*TxInput) {
+	tb.tx.AddInputs(inputs...)
 }
 
 // AddOutputs add outputs to the transaction body
-func (tb *TxBuilder) AddOutputs(outputs ...TxOutput) error {
-	return tb.tx.AddOutputs(outputs...)
+func (tb *TxBuilder) AddOutputs(outputs ...TxOutput) {
+	tb.tx.AddOutputs(outputs...)
 }
 
 // NewTxBuilder returns pointer to a new TxBuilder.

@@ -10,7 +10,42 @@ import (
 
 const Blake2b224Len = 28
 
-type Address string
+type Address []byte
+
+func (addr Address) String() string {
+	addr5Bit, err := bech32.ConvertBits(addr, 8, 5, true)
+	if err != nil {
+		panic(err)
+	}
+	res, err := bech32.Encode("addr", addr5Bit)
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
+func FromBech32(addrBech32 string) (Address, error) {
+	hrp, data, err := bech32.Decode(addrBech32)
+	if err != nil {
+		return nil, err
+	}
+	if hrp != "addr" {
+		return nil, fmt.Errorf("invalid hrp: %s", hrp)
+	}
+	addrBz, err := bech32.ConvertBits(data, 5, 8, false)
+	if err != nil {
+		return nil, err
+	}
+	return Address(addrBz), nil
+}
+
+func MustFromBech32(addrBech32 string) Address {
+	addr, err := FromBech32(addrBech32)
+	if err != nil {
+		panic(err)
+	}
+	return addr
+}
 
 func Blake2b224(data []byte) (result [Blake2b224Len]byte, err error) {
 	b2b, err := blake2b.New(Blake2b224Len, nil)
@@ -24,19 +59,17 @@ func Blake2b224(data []byte) (result [Blake2b224Len]byte, err error) {
 }
 
 func NewMainnetPaymentOnlyFromPubkey(pub []byte) (Address, error) {
+	// see CIP-19 for header explanation. This header encodes the following:
+	// - 4 MSBs: payment only address
+	// - 4 LSBs: mainnet
 	header := byte(0b01100001)
 	addr := []byte{header}
 	keyHash, err := Blake2b224(pub)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	addr = append(addr, keyHash[:]...)
-	addr5Bit, err := bech32.ConvertBits(addr, 8, 5, true)
-	if err != nil {
-		return "", err
-	}
-	res, err := bech32.Encode("addr", addr5Bit)
-	return Address(res), err
+	return Address(addr[:]), err
 }
 
 func PrivateKeyFromBech32(privBech32 string) (ed25519.PrivateKey, error) {

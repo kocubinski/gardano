@@ -21,7 +21,6 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/localtxsubmission"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
-	"github.com/fxamacker/cbor/v2"
 	"github.com/kocubinski/go-cardano/address"
 	"github.com/kocubinski/go-cardano/protocol"
 	"github.com/kocubinski/go-cardano/tx"
@@ -93,49 +92,6 @@ func debugTx(f *cliFlags) error {
 	if signKeyBech32 == "" {
 		return fmt.Errorf("CARDANO_SIGNING_KEY_BECH32 is not set")
 	}
-	txBody := tx.TxBody{
-		Inputs: tx.TxInputSet{
-			TxIns: []*tx.TxInput{
-				tx.NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
-			},
-		},
-		Outputs: make([]tx.TxOutput, 0),
-		// Outputs: []*tx.TxOutput{
-		// 	tx.NewTxOutput(address.Address("addr1v9f785wjgm4w0ky6lrjp4ecfj7dunzhql83ratqlpenqn2ssnlkjz"), 2500000),
-		// 	tx.NewTxOutput(address.Address("addr1v8hc0xl88ehea8698tjejhwjum87hsusdpne787znge7sps4x4v8v"), 166534),
-		// },
-		// Fee: 166249,
-	}
-	tx := tx.Tx{
-		Body:  txBody,
-		Valid: true,
-	}
-	txBodyBz, err := cbor.Marshal(txBody)
-	if err != nil {
-		return fmt.Errorf("failed to get transaction body bytes: %w", err)
-	}
-	txBz, err := tx.Bytes()
-	if err != nil {
-		return fmt.Errorf("failed to get transaction bytes: %w", err)
-	}
-	fmt.Printf("txBodyBz: %x\n", txBodyBz)
-	fmt.Printf("txBz: %x\n", txBz)
-
-	// txInHash, err := hex.DecodeString("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab")
-	// if err != nil {
-	// 	return fmt.Errorf("failed to decode txInHash: %w", err)
-	// }
-	// tx2 := conway.CreateSimpleTransaction([]conway.TransactionInput{
-	// 	{
-	// 		TransactionID: conway.Hash32(txInHash),
-	// 		Index:         0,
-	// 	},
-	// }, nil, 0)
-	// tx2Bz, err := conway.SerializeTransaction(tx2)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to serialize transaction: %w", err)
-	// }
-	// fmt.Printf("tx2Bz: %x\n", tx2Bz)
 
 	return nil
 }
@@ -167,7 +123,7 @@ func sendTx(f *cliFlags) error {
 	if err != nil {
 		return err
 	}
-	addr, err := ledger.NewAddress(string(sourceAddr))
+	addr, err := ledger.NewAddress(sourceAddr.String())
 	if err != nil {
 		return fmt.Errorf("failed to create address: %w", err)
 	}
@@ -233,17 +189,19 @@ func sendTx(f *cliFlags) error {
 		return fmt.Errorf("no matching utxo found")
 	}
 	txBuilder.AddInputs(txIn)
-	txBuilder.AddOutputs(tx.NewTxOutput(address.Address(f.receiverAddress), f.sendAmount))
-	tip, err := o.ChainSync().Client.GetCurrentTip()
-	if err != nil {
-		return fmt.Errorf("failed to get current tip: %w", err)
-	}
+	txBuilder.AddOutputs(tx.NewTxOutput(address.MustFromBech32(f.receiverAddress), f.sendAmount))
+	// tip, err := o.ChainSync().Client.GetCurrentTip()
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get current tip: %w", err)
+	// }
 	era, err := o.LocalStateQuery().Client.GetCurrentEra()
 	if err != nil {
 		return fmt.Errorf("failed to get current era: %w", err)
 	}
-	txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
-	txBuilder.AddChangeIfNeeded(sourceAddr)
+	// txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
+	if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
+		return fmt.Errorf("failed to add change: %w", err)
+	}
 	txFinal, err := txBuilder.Build()
 	if err != nil {
 		return fmt.Errorf("failed to build transaction: %w", err)
@@ -253,13 +211,6 @@ func sendTx(f *cliFlags) error {
 	if err != nil {
 		return fmt.Errorf("failed to get transaction bytes: %w", err)
 	}
-	// sanity check
-	// roundTripTx, err := ledger.NewConwayTransactionFromCbor(txBz)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to create transaction from cbor: %w", err)
-	// }
-	// roundTripBz := roundTripTx.Cbor()
-	// fmt.Printf("len(roundTripBz)=%d\n", len(roundTripBz))
 	jsonBz, err := json.MarshalIndent(txFinal, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to json marshal transaction: %w", err)
