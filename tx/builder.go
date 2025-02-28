@@ -61,12 +61,14 @@ func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) error {
 	totalI, totalO := tb.getTotalInputOutputs()
 
 	change := totalI - totalO - uint(tb.tx.Body.Fee)
-	tb.tx.AddOutputs(
-		NewTxOutput(
-			addr,
-			change,
-		),
-	)
+	if change > 0 {
+		tb.tx.AddOutputs(
+			NewTxOutput(
+				addr,
+				change,
+			),
+		)
+	}
 	return nil
 }
 

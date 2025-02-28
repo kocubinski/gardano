@@ -12,6 +12,7 @@ const Blake2b224Len = 28
 
 type Address []byte
 
+// String returns the bech32 representation of the address
 func (addr Address) String() string {
 	addr5Bit, err := bech32.ConvertBits(addr, 8, 5, true)
 	if err != nil {

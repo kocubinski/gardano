@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,9 @@ import (
 	"github.com/kocubinski/go-cardano/tx"
 )
 
+// 1 input 1 output tx fee:
+// 1 input 2 outputs tx fee: 169329
+
 type cliFlags struct {
 	flagset *flag.FlagSet
 
@@ -36,6 +40,13 @@ type cliFlags struct {
 	receiverAddress string
 	pparams         string
 	sendAmount      uint
+	memo            string
+	fee             uint
+
+	// chain sync
+	filterAddresses string
+	startHash       string
+	startSlot       uint64
 }
 
 func main() {
@@ -49,6 +60,12 @@ func main() {
 	f := &cliFlags{
 		flagset: flag.NewFlagSet(command, flag.ExitOnError),
 	}
+	parseFlags := func() {
+		if err := f.flagset.Parse(os.Args[2:]); err != nil {
+			fmt.Println("failed to parse flags:", err)
+			os.Exit(1)
+		}
+	}
 	var err error
 	switch command {
 	case "send-tx":
@@ -56,19 +73,19 @@ func main() {
 		f.flagset.StringVar(&f.pparams, "protocol-parameters-file", "", "Path to protocol parameters file")
 		f.flagset.UintVar(&f.sendAmount, "amount", 0, "Amount to send")
 		f.flagset.StringVar(&f.clientAddress, "address", "", "socket address for n2c communication")
-		if err := f.flagset.Parse(os.Args[2:]); err != nil {
-			fmt.Println("failed to parse flags:", err)
-			os.Exit(1)
-		}
+		f.flagset.StringVar(&f.memo, "memo", "", "optional tx memo")
+		f.flagset.UintVar(&f.fee, "fee", 0, "if unset fees are dynamically calculated")
+		parseFlags()
 		err = sendTx(f)
-	case "run-node":
-		err = runNode()
+	case "chain-sync":
+		f.flagset.StringVar(&f.filterAddresses, "filter-addresses", "", "Filter addresses")
+		f.flagset.StringVar(&f.startHash, "start-hash", "", "Start hash")
+		f.flagset.Uint64Var(&f.startSlot, "start-slot", 0, "Start slot")
+		parseFlags()
+		err = runNode(f)
 	case "debug-tx":
 		f.flagset.StringVar(&f.clientAddress, "address", "", "socket address for n2c communication")
-		if err := f.flagset.Parse(os.Args[2:]); err != nil {
-			fmt.Println("failed to parse flags:", err)
-			os.Exit(1)
-		}
+		parseFlags()
 		err = debugTx(f)
 	default:
 		fmt.Println("unknown command")
@@ -83,8 +100,8 @@ func main() {
 var (
 	ouroborosConnection *ouroboros.Connection
 	shutdownWait        sync.WaitGroup
-	startHash           = "5baf72ec3430f0f65b5b7356d2b15720e451ac6593652bcbea4dd60a1ab99ebd"
-	startSlot           = uint64(148785568)
+	// startHash           = "5baf72ec3430f0f65b5b7356d2b15720e451ac6593652bcbea4dd60a1ab99ebd"
+	// startSlot           = uint64(148785568)
 )
 
 func debugTx(f *cliFlags) error {
@@ -171,10 +188,14 @@ func sendTx(f *cliFlags) error {
 	}
 
 	var txIn *tx.TxInput
-	minRequired := f.sendAmount + 167217 // estimate fee
+	estimatedFee := uint(167217)
+	if f.fee > 0 {
+		estimatedFee = f.fee
+	}
+	minRequired := f.sendAmount + estimatedFee // estimate fee
 	for txId, txOut := range utxoRes.Results {
 		utxoAmount := uint(txOut.Amount())
-		fmt.Printf("tx-hash: %s, tx-idx: %d, address: %s, amount: %d\n",
+		fmt.Printf("UTXO Tx:\ntx-hash: %s, tx-idx: %d, address: %s, amount: %d\n",
 			txId.Hash.String(),
 			txId.Idx,
 			txOut.Address(),
@@ -189,7 +210,9 @@ func sendTx(f *cliFlags) error {
 		return fmt.Errorf("no matching utxo found")
 	}
 	txBuilder.AddInputs(txIn)
-	txBuilder.AddOutputs(tx.NewTxOutput(address.MustFromBech32(f.receiverAddress), f.sendAmount))
+
+	sendAmount := f.sendAmount
+	txBuilder.AddOutputs(tx.NewTxOutput(address.MustFromBech32(f.receiverAddress), sendAmount))
 	// tip, err := o.ChainSync().Client.GetCurrentTip()
 	// if err != nil {
 	// 	return fmt.Errorf("failed to get current tip: %w", err)
@@ -199,14 +222,18 @@ func sendTx(f *cliFlags) error {
 		return fmt.Errorf("failed to get current era: %w", err)
 	}
 	// txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
-	if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
-		return fmt.Errorf("failed to add change: %w", err)
+	// if fee is set assume we're consuming the whole tx (not really correct only for testing)
+	if f.fee > 0 {
+		txBuilder.Tx().SetFee(f.fee)
+	} else {
+		if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
+			return fmt.Errorf("failed to add change: %w", err)
+		}
 	}
 	txFinal, err := txBuilder.Build()
 	if err != nil {
 		return fmt.Errorf("failed to build transaction: %w", err)
 	}
-	fmt.Println("txFinal:", txFinal)
 	txBz, err := txFinal.Bytes()
 	if err != nil {
 		return fmt.Errorf("failed to get transaction bytes: %w", err)
@@ -226,7 +253,10 @@ func sendTx(f *cliFlags) error {
 	return nil
 }
 
-func runNode() error {
+func runNode(f *cliFlags) error {
+	if f.filterAddresses != "" {
+		filterAddresses = strings.Split(f.filterAddresses, ",")
+	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -264,17 +294,25 @@ func runNode() error {
 		return fmt.Errorf("failed to create connection: %w", err)
 	}
 
-	tip, err := o.ChainSync().Client.GetCurrentTip()
-	if err != nil {
-		return fmt.Errorf("failed to get current tip: %w", err)
+	var point common.Point
+	if f.startHash != "" && f.startSlot != 0 {
+		h, err := hex.DecodeString(f.startHash)
+		if err != nil {
+			return fmt.Errorf("failed to decode start hash: %w", err)
+		}
+		point = common.Point{
+			Slot: f.startSlot,
+			Hash: h,
+		}
+	} else {
+		tip, err := o.ChainSync().Client.GetCurrentTip()
+		if err != nil {
+			return fmt.Errorf("failed to get current tip: %w", err)
+		}
+		point = tip.Point
+		fmt.Printf("queried tip: slot = %d, hash = %x\n", point.Slot, point.Hash)
 	}
-	fmt.Printf("tip: slot = %d, hash = %x\n", tip.Point.Slot, tip.Point.Hash)
 
-	h, err := hex.DecodeString(startHash)
-	if err != nil {
-		return fmt.Errorf("failed to decode start hash: %w", err)
-	}
-	point := common.Point{Slot: startSlot, Hash: h}
 	if err := o.ChainSync().Client.Sync([]common.Point{point}); err != nil {
 		fmt.Printf("ERROR: failed to start chain-sync: %s\n", err)
 		os.Exit(1)
@@ -304,6 +342,8 @@ func buildTxSubmissionConfig() txsubmission.Config {
 		txsubmission.WithRequestTxIdsFunc(txSubmissionIdsRequestHandler),
 	)
 }
+
+var filterAddresses []string
 
 func chainSyncRollForwardHandler(
 	ctx chainsync.CallbackContext,
@@ -355,27 +395,22 @@ func chainSyncRollForwardHandler(
 			block.Hash(),
 			len(block.Transactions()),
 		)
+		if len(filterAddresses) > 0 {
+			for _, tx := range block.Transactions() {
+				for _, txOut := range tx.Outputs() {
+					for _, addr := range filterAddresses {
+						if addr == txOut.Address().String() {
+							fmt.Printf("tx-hash: %s, address: %s, amount: %d\n",
+								tx.Hash(),
+								txOut.Address(),
+								txOut.Amount(),
+							)
+						}
+					}
+				}
+			}
+		}
 	}
-	// err := ouroborosConnection.LocalStateQuery().Client.AcquireImmutableTip()
-	// if err != nil {
-	// 	return fmt.Errorf("failed to acquire immutable tip: %w", err)
-	// }
-	// immutableBlockNo, err := ouroborosConnection.LocalStateQuery().Client.GetChainBlockNo()
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get chain block number: %w", err)
-	// }
-	// immutablePoint, err := ouroborosConnection.LocalStateQuery().Client.GetChainPoint()
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get chain point: %w", err)
-	// }
-	// fmt.Printf(
-	// 	"immutable tip: blockNo = %d, slot = %d, hash = %x\n",
-	// 	immutableBlockNo, immutablePoint.Slot, immutablePoint.Hash,
-	// )
-	// err = ouroborosConnection.LocalStateQuery().Client.Release()
-	// if err != nil {
-	// 	return fmt.Errorf("failed to release immutable tip: %w", err)
-	// }
 
 	return nil
 }
