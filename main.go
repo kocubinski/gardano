@@ -201,21 +201,26 @@ func sendTx(f *cliFlags) error {
 
 	sendAmount := f.sendAmount
 	txBuilder.AddOutputs(tx.NewTxOutput(address.MustFromBech32(f.receiverAddress), sendAmount))
-	// tip, err := o.ChainSync().Client.GetCurrentTip()
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get current tip: %w", err)
-	// }
-	era, err := o.LocalStateQuery().Client.GetCurrentEra()
+
+	tip, err := o.ChainSync().Client.GetCurrentTip()
 	if err != nil {
-		return fmt.Errorf("failed to get current era: %w", err)
+		return fmt.Errorf("failed to get current tip for TTL: %w", err)
 	}
-	// txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
-	// if fee is set assume we're consuming the whole tx (not really correct only for testing)
+	txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
+
+	// if fee is set assume we're consuming the whole tx (not really correct, only for testing)
 	if f.fee > 0 {
 		txBuilder.Tx().SetFee(f.fee)
 	} else {
 		if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
 			return fmt.Errorf("failed to add change: %w", err)
+		}
+	}
+
+	// set memo if present
+	if f.memo != "" {
+		if err := txBuilder.SetMemo(f.memo); err != nil {
+			return fmt.Errorf("failed to set memo: %w", err)
 		}
 	}
 	txFinal, err := txBuilder.Build()
@@ -232,6 +237,11 @@ func sendTx(f *cliFlags) error {
 	}
 	fmt.Printf("txFinal:\n%s\n", jsonBz)
 	shutdownWait.Add(1)
+
+	era, err := o.LocalStateQuery().Client.GetCurrentEra()
+	if err != nil {
+		return fmt.Errorf("failed to get current era: %w", err)
+	}
 	err = o.LocalTxSubmission().Client.SubmitTx(uint16(era), txBz)
 	if err != nil {
 		return fmt.Errorf("failed to submit transaction: %w", err)
@@ -384,15 +394,21 @@ func chainSyncRollForwardHandler(
 			len(block.Transactions()),
 		)
 		if len(filterAddresses) > 0 {
-			for _, tx := range block.Transactions() {
-				for _, txOut := range tx.Outputs() {
+			for _, blockTx := range block.Transactions() {
+				for _, txOut := range blockTx.Outputs() {
 					for _, addr := range filterAddresses {
 						if addr == txOut.Address().String() {
-							fmt.Printf("tx-hash: %s, address: %s, amount: %d\n",
-								tx.Hash(),
+							fmt.Printf("filter tx:\n  tx-hash: %s\n  address: %s\n  amount: %d\n",
+								blockTx.Hash(),
 								txOut.Address(),
 								txOut.Amount(),
 							)
+							memo, err := tx.DecodeMemo(blockTx)
+							if err != nil {
+								fmt.Printf("ERROR: failed to decode memo: %s\n", err)
+							} else if memo != "" {
+								fmt.Printf("  memo: %s\n", memo)
+							}
 						}
 					}
 				}
@@ -494,7 +510,7 @@ func maxNumberUTxOs(utxoRes *localstatequery.UTxOByAddressResult, targetAmount u
 	}
 
 	if targetAmount > 0 {
-		return nil, fmt.Errorf("insufficient funds")
+		return nil, fmt.Errorf("insufficient funds; short by %d", targetAmount)
 	}
 
 	return res, nil

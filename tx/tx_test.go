@@ -2,10 +2,13 @@ package tx_test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"testing"
 
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/kocubinski/go-cardano/address"
 	"github.com/kocubinski/go-cardano/tx"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_TransactionSpec(t *testing.T) {
@@ -79,4 +82,25 @@ func Test_TransactionSpec(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_Metadata(t *testing.T) {
+	cborMetadata := "a11902a2a1636d7367816b666f6f2b6261722d62617a"
+	cborBytes, err := hex.DecodeString(cborMetadata)
+	require.NoError(t, err)
+	lazyValue := &cbor.LazyValue{}
+	err = lazyValue.UnmarshalCBOR(cborBytes)
+	require.NoError(t, err)
+	require.Nil(t, lazyValue.Value())
+	res, err := lazyValue.Decode()
+	require.NoError(t, err)
+	require.Equal(t, res, lazyValue.Value())
+
+	jsonBytes, err := lazyValue.MarshalJSON()
+	require.NoError(t, err)
+	fmt.Println(string(jsonBytes))
+
+	memo, err := tx.DecodeMemoFromMetadata(lazyValue)
+	require.NoError(t, err)
+	require.Equal(t, "foo+bar-baz", memo)
 }

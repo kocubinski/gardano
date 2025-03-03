@@ -62,7 +62,7 @@ type Tx struct {
 	Body       TxBody
 	WitnessSet WitnessSet
 	Valid      bool
-	Metadata   interface{}
+	Metadata   map[uint64]any
 }
 
 // NewTx returns a pointer to a new Transaction
@@ -80,7 +80,7 @@ func (t *Tx) Bytes() ([]byte, error) {
 		t.Body,
 		t.WitnessSet,
 		t.Valid,
-		nil,
+		t.Metadata,
 	}
 	return cbor.Marshal(txArray)
 }

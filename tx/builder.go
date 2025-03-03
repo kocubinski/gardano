@@ -2,6 +2,7 @@ package tx
 
 import (
 	"crypto/ed25519"
+	"fmt"
 
 	"github.com/kocubinski/go-cardano/address"
 	"github.com/kocubinski/go-cardano/fees"
@@ -75,6 +76,31 @@ func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) error {
 // SetTTL sets the time to live for the transaction.
 func (tb *TxBuilder) SetTTL(ttl uint32) {
 	tb.tx.Body.TTL = ttl
+}
+
+// SetMemo sets the memo for the transaction as specified in https://cips.cardano.org/cip/CIP-20
+func (tb *TxBuilder) SetMemo(memos ...string) error {
+	if len(memos) == 0 {
+		return nil
+	}
+	for _, m := range memos {
+		if len(m) > 64 {
+			return fmt.Errorf("memo is too long: %d", len(m))
+		}
+	}
+
+	if tb.tx.Metadata == nil {
+		tb.tx.Metadata = make(map[uint64]any)
+	}
+	msgEnvelope := make(map[string][]string)
+	msgEnvelope["msg"] = memos
+
+	if _, ok := tb.tx.Metadata[674]; ok {
+		return fmt.Errorf("memo already set")
+	}
+	tb.tx.Metadata[674] = msgEnvelope
+
+	return nil
 }
 
 func (tb TxBuilder) getTotalInputOutputs() (inputs, outputs uint) {
