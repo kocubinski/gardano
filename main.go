@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -187,29 +188,16 @@ func sendTx(f *cliFlags) error {
 		return fmt.Errorf("failed to get utxo: %w", err)
 	}
 
-	var txIn *tx.TxInput
 	estimatedFee := uint(167217)
 	if f.fee > 0 {
 		estimatedFee = f.fee
 	}
 	minRequired := f.sendAmount + estimatedFee // estimate fee
-	for txId, txOut := range utxoRes.Results {
-		utxoAmount := uint(txOut.Amount())
-		fmt.Printf("UTXO Tx:\ntx-hash: %s, tx-idx: %d, address: %s, amount: %d\n",
-			txId.Hash.String(),
-			txId.Idx,
-			txOut.Address(),
-			utxoAmount,
-		)
-		if utxoAmount >= minRequired {
-			txIn = tx.NewTxInput(txId.Hash.String(), uint16(txId.Idx), uint(txOut.Amount()))
-			break
-		}
+	txIns, err := maxNumberUTxOs(utxoRes, minRequired)
+	if err != nil {
+		return err
 	}
-	if txIn == nil {
-		return fmt.Errorf("no matching utxo found")
-	}
-	txBuilder.AddInputs(txIn)
+	txBuilder.AddInputs(txIns...)
 
 	sendAmount := f.sendAmount
 	txBuilder.AddOutputs(tx.NewTxOutput(address.MustFromBech32(f.receiverAddress), sendAmount))
@@ -476,4 +464,38 @@ func createClientConnection(address string, useTls bool) (net.Conn, error) {
 	} else {
 		return net.Dial("tcp", address)
 	}
+}
+
+func maxNumberUTxOs(utxoRes *localstatequery.UTxOByAddressResult, targetAmount uint) ([]*tx.TxInput, error) {
+	var txIns []*tx.TxInput
+	for txId, txOut := range utxoRes.Results {
+		txIn := tx.NewTxInput(txId.Hash.String(), uint16(txId.Idx), uint(txOut.Amount()))
+		txIns = append(txIns, txIn)
+		fmt.Printf("txId: %s, txOut: %d\n", txId.Hash.String(), txOut.Amount())
+	}
+	slices.SortFunc(txIns, func(a, b *tx.TxInput) int {
+		switch {
+		case a.Amount < b.Amount:
+			return -1
+		case a.Amount > b.Amount:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	var res []*tx.TxInput
+	for _, txIn := range txIns {
+		res = append(res, txIn)
+		targetAmount -= txIn.Amount
+		if targetAmount <= 0 {
+			break
+		}
+	}
+
+	if targetAmount > 0 {
+		return nil, fmt.Errorf("insufficient funds")
+	}
+
+	return res, nil
 }
