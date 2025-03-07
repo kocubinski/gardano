@@ -4,9 +4,9 @@ import (
 	"crypto/ed25519"
 	"fmt"
 
-	"github.com/kocubinski/go-cardano/address"
-	"github.com/kocubinski/go-cardano/fees"
-	"github.com/kocubinski/go-cardano/protocol"
+	"github.com/kocubinski/gardano/address"
+	"github.com/kocubinski/gardano/fees"
+	"github.com/kocubinski/gardano/protocol"
 )
 
 // TxBuilder - used to create, validate and sign transactions.

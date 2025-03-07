@@ -1,4 +1,4 @@
-module github.com/kocubinski/go-cardano
+module github.com/kocubinski/gardano
 
 go 1.24.0
 

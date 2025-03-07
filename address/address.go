@@ -30,7 +30,7 @@ func FromBech32(addrBech32 string) (Address, error) {
 	if err != nil {
 		return nil, err
 	}
-	if hrp != "addr" {
+	if hrp != "addr" && hrp != "addr_test" {
 		return nil, fmt.Errorf("invalid hrp: %s", hrp)
 	}
 	addrBz, err := bech32.ConvertBits(data, 5, 8, false)
@@ -64,6 +64,20 @@ func NewMainnetPaymentOnlyFromPubkey(pub []byte) (Address, error) {
 	// - 4 MSBs: payment only address
 	// - 4 LSBs: mainnet
 	header := byte(0b01100001)
+	addr := []byte{header}
+	keyHash, err := Blake2b224(pub)
+	if err != nil {
+		return nil, err
+	}
+	addr = append(addr, keyHash[:]...)
+	return Address(addr[:]), err
+}
+
+func NewTestnetPaymentOnlyFromPubkey(pub []byte) (Address, error) {
+	// see CIP-19 for header explanation. This header encodes the following:
+	// - 4 MSBs: payment only address
+	// - 4 LSBs: mainnet
+	header := byte(0b01100000)
 	addr := []byte{header}
 	keyHash, err := Blake2b224(pub)
 	if err != nil {

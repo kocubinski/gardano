@@ -7,7 +7,7 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/gcash/bchutil/bech32"
-	"github.com/kocubinski/go-cardano/address"
+	"github.com/kocubinski/gardano/address"
 	"github.com/stretchr/testify/require"
 )
 

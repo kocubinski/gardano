@@ -7,8 +7,8 @@ import (
 	"reflect"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/kocubinski/go-cardano/address"
-	"github.com/kocubinski/go-cardano/fees"
+	"github.com/kocubinski/gardano/address"
+	"github.com/kocubinski/gardano/fees"
 	"golang.org/x/crypto/blake2b"
 )
 

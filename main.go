@@ -23,9 +23,10 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/localtxsubmission"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
-	"github.com/kocubinski/go-cardano/address"
-	"github.com/kocubinski/go-cardano/protocol"
-	"github.com/kocubinski/go-cardano/tx"
+	"github.com/kocubinski/gardano/address"
+	"github.com/kocubinski/gardano/cbor"
+	"github.com/kocubinski/gardano/protocol"
+	"github.com/kocubinski/gardano/tx"
 )
 
 // 1 input 1 output tx fee:
@@ -34,8 +35,11 @@ import (
 type cliFlags struct {
 	flagset *flag.FlagSet
 
+	networkMagic uint32
+
 	// client
 	clientAddress string
+	clientSocket  string
 
 	// Tx submission
 	receiverAddress string
@@ -52,7 +56,7 @@ type cliFlags struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go-cardano <command>")
+		fmt.Println("Usage: gardano <command>")
 		os.Exit(1)
 	}
 	command := os.Args[1]
@@ -73,10 +77,14 @@ func main() {
 		f.flagset.StringVar(&f.receiverAddress, "receiver-address", "", "Address to send to")
 		f.flagset.StringVar(&f.pparams, "protocol-parameters-file", "", "Path to protocol parameters file")
 		f.flagset.UintVar(&f.sendAmount, "amount", 0, "Amount to send")
-		f.flagset.StringVar(&f.clientAddress, "address", "", "socket address for n2c communication")
+		f.flagset.StringVar(&f.clientAddress, "address", "", "TCP address for n2c communication")
+		f.flagset.StringVar(&f.clientSocket, "socket", "", "unix socket address for n2c communication")
 		f.flagset.StringVar(&f.memo, "memo", "", "optional tx memo")
 		f.flagset.UintVar(&f.fee, "fee", 0, "if unset fees are dynamically calculated")
+		var networkMagic uint
+		f.flagset.UintVar(&networkMagic, "magic", 764824073, "network magic")
 		parseFlags()
+		f.networkMagic = uint32(networkMagic)
 		err = sendTx(f)
 	case "chain-sync":
 		f.flagset.StringVar(&f.filterAddresses, "filter-addresses", "", "Filter addresses")
@@ -114,13 +122,28 @@ func debugTx(f *cliFlags) error {
 	return nil
 }
 
-func sendTx(f *cliFlags) error {
-	signKeyBech32 := os.Getenv("CARDANO_SIGNING_KEY_BECH32")
-	if signKeyBech32 == "" {
-		return fmt.Errorf("CARDANO_SIGNING_KEY_BECH32 is not set")
+func getPrivateKey() (ed25519.PrivateKey, error) {
+	if signKeyBech32 := os.Getenv("CARDANO_SIGNING_KEY_BECH32"); signKeyBech32 != "" {
+		return address.PrivateKeyFromBech32(signKeyBech32)
 	}
-	if f.clientAddress == "" {
-		return fmt.Errorf("client address is not set")
+	if signKeyHex := os.Getenv("CARDANO_SIGNING_KEY_CBOR"); signKeyHex != "" {
+		cborBz, err := hex.DecodeString(signKeyHex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode hex: %w", err)
+		}
+		var keyBz []byte
+		_, err = cbor.Decode(cborBz, &keyBz)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode cbor: %w", err)
+		}
+		return ed25519.NewKeyFromSeed(keyBz), nil
+	}
+	return nil, fmt.Errorf("no signing key provided")
+}
+
+func sendTx(f *cliFlags) error {
+	if f.clientAddress == "" && f.clientSocket == "" {
+		return fmt.Errorf("client address/socket is not set")
 	}
 	if f.pparams == "" {
 		return fmt.Errorf("protocol parameters file is not set")
@@ -132,12 +155,17 @@ func sendTx(f *cliFlags) error {
 		return fmt.Errorf("receiver address is not set")
 	}
 
-	priv, err := address.PrivateKeyFromBech32(signKeyBech32)
+	priv, err := getPrivateKey()
 	if err != nil {
 		return fmt.Errorf("failed to create private key: %w", err)
 	}
 	pub := priv.Public().(ed25519.PublicKey)
-	sourceAddr, err := address.NewMainnetPaymentOnlyFromPubkey(pub)
+	var sourceAddr address.Address
+	if f.networkMagic == 42 {
+		sourceAddr, err = address.NewTestnetPaymentOnlyFromPubkey(pub)
+	} else {
+		sourceAddr, err = address.NewMainnetPaymentOnlyFromPubkey(pub)
+	}
 	if err != nil {
 		return err
 	}
@@ -162,8 +190,16 @@ func sendTx(f *cliFlags) error {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
-	network := ouroboros.NetworkMainnet
-	client, err := createClientConnection(f.clientAddress, false)
+	network, ok := ouroboros.NetworkByNetworkMagic(f.networkMagic)
+	if !ok {
+		return fmt.Errorf("unknown network magic: %d", f.networkMagic)
+	}
+	var client net.Conn
+	if f.clientSocket != "" {
+		client, err = net.Dial("unix", f.clientSocket)
+	} else {
+		client, err = net.Dial("tcp", f.clientAddress)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to create client connection: %w", err)
 	}
@@ -209,12 +245,9 @@ func sendTx(f *cliFlags) error {
 	txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
 
 	// if fee is set assume we're consuming the whole tx (not really correct, only for testing)
-	if f.fee > 0 {
-		txBuilder.Tx().SetFee(f.fee)
-	} else {
-		if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
-			return fmt.Errorf("failed to add change: %w", err)
-		}
+	txBuilder.Tx().SetFee(f.fee)
+	if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
+		return fmt.Errorf("failed to add change: %w", err)
 	}
 
 	// set memo if present
@@ -268,7 +301,10 @@ func runNode(f *cliFlags) error {
 			time.Sleep(1 * time.Second)
 		}
 	}()
-	network := ouroboros.NetworkMainnet
+	network, ok := ouroboros.NetworkByNetworkMagic(f.networkMagic)
+	if !ok {
+		return fmt.Errorf("unknown network magic: %d", f.networkMagic)
+	}
 	peer := network.BootstrapPeers[0]
 	client, err := createClientConnection(fmt.Sprintf("%s:%d", peer.Address, peer.Port), false)
 	if err != nil {
@@ -325,6 +361,7 @@ func buildChainSyncConfig() chainsync.Config {
 	return chainsync.NewConfig(
 		chainsync.WithRollBackwardFunc(chainSyncRollBackwardHandler),
 		chainsync.WithRollForwardFunc(chainSyncRollForwardHandler),
+		// chainsync.WithRollForwardRawFunc(chainSyncRollForwardRawHandler),
 	)
 }
 
@@ -356,7 +393,7 @@ func chainSyncRollForwardHandler(
 	case ledger.BlockHeader:
 		blockSlot := v.SlotNumber()
 		blockHash, _ := hex.DecodeString(v.Hash())
-		// fmt.Printf("block header, fetching block (%d, %x)\n", blockSlot, blockHash)
+		fmt.Printf("block header, fetching block (%d, %x)\n", blockSlot, blockHash)
 		var err error
 		block, err = ouroborosConnection.BlockFetch().Client.GetBlock(common.NewPoint(blockSlot, blockHash))
 		if err != nil {
@@ -435,6 +472,16 @@ func blockFetchBlockHandler(
 	return nil
 }
 
+func chainSyncRollForwardRawHandler(
+	ctx chainsync.CallbackContext,
+	blockType uint,
+	rawBlockData []byte,
+	tip chainsync.Tip,
+) error {
+	fmt.Printf("roll forward raw: tip = (%d, %x) bytes = %d\n", tip.Point.Slot, tip.Point.Hash, len(rawBlockData))
+	return nil
+}
+
 func chainSyncRollBackwardHandler(
 	ctx chainsync.CallbackContext,
 	point common.Point,
@@ -503,10 +550,11 @@ func maxNumberUTxOs(utxoRes *localstatequery.UTxOByAddressResult, targetAmount u
 	var res []*tx.TxInput
 	for _, txIn := range txIns {
 		res = append(res, txIn)
-		targetAmount -= txIn.Amount
-		if targetAmount <= 0 {
+		if txIn.Amount > targetAmount {
+			targetAmount = 0
 			break
 		}
+		targetAmount -= txIn.Amount
 	}
 
 	if targetAmount > 0 {

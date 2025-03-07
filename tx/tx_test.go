@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
-	"github.com/kocubinski/go-cardano/address"
-	"github.com/kocubinski/go-cardano/tx"
+	"github.com/kocubinski/gardano/address"
+	"github.com/kocubinski/gardano/tx"
 	"github.com/stretchr/testify/require"
 )
 
