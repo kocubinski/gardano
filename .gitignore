@@ -1,3 +1,6 @@
-go-cardano
+gardano
 test.env
 .vscode/
+devnet/
+pparams.json
+logs/
