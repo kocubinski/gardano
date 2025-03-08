@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-export CARDANO_NODE_SOCKET_PATH=devnet/main.sock
+export CARDANO_NODE_SOCKET_PATH=$PWD/devnet.sock
 export CARDANO_NODE_NETWORK_ID=42
 
 if [ -z "$1" ]; then
@@ -13,7 +13,7 @@ if [ ! -f pparams.json ]; then
 fi
 
 gardano send-tx \
-    -socket devnet/main.sock \
+    -socket devnet.sock \
     -protocol-parameters-file ./pparams.json \
     -amount 1000000 -fee 170000 \
     -magic 42 \
