@@ -1,10 +1,13 @@
-TAG := cardano-devnet
+TAG := ghcr.io/kocubinski/cardano-devnet:0.1.0
 
 devnet:
 	./scripts/bootstrap-devnet.sh
 
 docker: devnet
 	docker build --tag $(TAG) .
+
+push:
+	docker push $(TAG)
 
 docker-run: docker-env
 	docker run -it  -p 7007:7007 -v $(PWD)/devnet:/devnet $(TAG)
