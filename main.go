@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/hex"
@@ -23,6 +24,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/blinklabs-io/gouroboros/protocol/localtxsubmission"
 	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
+	"github.com/gcash/bchutil/bech32"
 	"github.com/kocubinski/gardano/address"
 	"github.com/kocubinski/gardano/cbor"
 	"github.com/kocubinski/gardano/protocol"
@@ -36,6 +38,9 @@ type cliFlags struct {
 	flagset *flag.FlagSet
 
 	networkMagic uint32
+
+	// key pair
+	seed string
 
 	// client
 	clientAddress string
@@ -61,7 +66,6 @@ func main() {
 	}
 	command := os.Args[1]
 
-	fmt.Println("command:", command)
 	f := &cliFlags{
 		flagset: flag.NewFlagSet(command, flag.ExitOnError),
 	}
@@ -92,10 +96,13 @@ func main() {
 		f.flagset.Uint64Var(&f.startSlot, "start-slot", 0, "Start slot")
 		parseFlags()
 		err = runNode(f)
-	case "debug-tx":
-		f.flagset.StringVar(&f.clientAddress, "address", "", "socket address for n2c communication")
+	case "key-pair":
+		f.flagset.StringVar(&f.seed, "seed", "", "random seed for key pair")
+		var networkMagic uint
+		f.flagset.UintVar(&networkMagic, "magic", 764824073, "network magic")
 		parseFlags()
-		err = debugTx(f)
+		f.networkMagic = uint32(networkMagic)
+		err = makeKeyPair(f)
 	default:
 		fmt.Println("unknown command")
 		os.Exit(1)
@@ -113,12 +120,52 @@ var (
 	// startSlot           = uint64(148785568)
 )
 
-func debugTx(f *cliFlags) error {
-	signKeyBech32 := os.Getenv("CARDANO_SIGNING_KEY_BECH32")
-	if signKeyBech32 == "" {
-		return fmt.Errorf("CARDANO_SIGNING_KEY_BECH32 is not set")
+func makeKeyPair(f *cliFlags) error {
+	seedBz, err := hex.DecodeString(f.seed)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("seed: %+v\n", seedBz)
+	var buf bytes.Buffer
+	buf.Write(seedBz)
+	pub, priv, err := ed25519.GenerateKey(&buf)
+	if err != nil {
+		return err
+	}
+	var addr address.Address
+	switch f.networkMagic {
+	case 764824073:
+		addr, err = address.NewMainnetPaymentOnlyFromPubkey(pub)
+	case 42:
+		addr, err = address.NewTestnetPaymentOnlyFromPubkey(pub)
+	default:
+		return fmt.Errorf("unknown network magic: %d", f.networkMagic)
+	}
+	if err != nil {
+		return err
 	}
 
+	pub5Bit, err := bech32.ConvertBits(pub, 8, 5, true)
+	if err != nil {
+		return err
+	}
+	pubBech32, err := bech32.Encode("addr_vk", pub5Bit)
+	if err != nil {
+		return err
+	}
+
+	priv5Bit, err := bech32.ConvertBits(priv.Seed(), 8, 5, true)
+	if err != nil {
+		return err
+	}
+	privBech32, err := bech32.Encode("addr_sk", priv5Bit)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("addr: %s\n", addr.String())
+	fmt.Printf(" pub: %s\n", pubBech32)
+	fmt.Printf("priv: %s\n", privBech32)
 	return nil
 }
 
@@ -138,7 +185,7 @@ func getPrivateKey() (ed25519.PrivateKey, error) {
 		}
 		return ed25519.NewKeyFromSeed(keyBz), nil
 	}
-	return nil, fmt.Errorf("no signing key provided")
+	return nil, fmt.Errorf("either CARDANO_SIGNING_KEY_BECH32 or CARDANO_SIGNING_KEY_CBOR must be set")
 }
 
 func sendTx(f *cliFlags) error {

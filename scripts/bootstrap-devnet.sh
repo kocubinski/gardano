@@ -68,10 +68,10 @@ cp scripts/alonzo-babbage-test-genesis.json "${ROOT}/genesis.alonzo.spec.json"
 cp scripts/conway-babbage-test-genesis.json "${ROOT}/genesis.conway.spec.json"
 
 cp scripts/configuration.yaml "${ROOT}/"
+    #  -e 's/minSeverity: Info/minSeverity: Debug/' \
 $SED -i "${ROOT}/configuration.yaml" \
      -e 's/Protocol: RealPBFT/Protocol: Cardano/' \
      -e '/Protocol/ aPBftSignatureThreshold: 0.6' \
-     -e 's/minSeverity: Info/minSeverity: Debug/' \
      -e 's|GenesisFile: genesis.json|ByronGenesisFile: genesis/byron/genesis.json|' \
      -e '/ByronGenesisFile/ aShelleyGenesisFile: genesis/shelley/genesis.json' \
      -e '/ByronGenesisFile/ aAlonzoGenesisFile: genesis/shelley/genesis.alonzo.json' \
@@ -80,6 +80,7 @@ $SED -i "${ROOT}/configuration.yaml" \
      -e 's/LastKnownBlockVersion-Major: 0/LastKnownBlockVersion-Major: 6/' \
      -e 's/LastKnownBlockVersion-Minor: 2/LastKnownBlockVersion-Minor: 0/'
 
+  echo "" >> "${ROOT}/configuration.yaml"
   echo "TestShelleyHardForkAtEpoch: 0" >> "${ROOT}/configuration.yaml"
   echo "TestAllegraHardForkAtEpoch: 0" >> "${ROOT}/configuration.yaml"
   echo "TestMaryHardForkAtEpoch: 0" >> "${ROOT}/configuration.yaml"
@@ -125,7 +126,7 @@ rm "${ROOT}/genesis/byron/genesis-wrong.json"
 
 cp "${ROOT}/genesis/shelley/genesis.json" "${ROOT}/genesis/shelley/copy-genesis.json"
 
-jq -M '. + {slotLength:0.1, securityParam:10, activeSlotsCoeff:0.1, securityParam:10, epochLength:500, maxLovelaceSupply:10000000000000, updateQuorum:2}' "${ROOT}/genesis/shelley/copy-genesis.json" > "${ROOT}/genesis/shelley/copy2-genesis.json"
+jq -M '. + {slotLength:0.5, securityParam:10, activeSlotsCoeff:0.1, securityParam:10, epochLength:500, maxLovelaceSupply:10000000000000, updateQuorum:2}' "${ROOT}/genesis/shelley/copy-genesis.json" > "${ROOT}/genesis/shelley/copy2-genesis.json"
 jq --raw-output '.protocolParams.protocolVersion.major = 7 | .protocolParams.minFeeA = 44 | .protocolParams.minFeeB = 155381 | .protocolParams.minUTxOValue = 1000000 | .protocolParams.decentralisationParam = 0.7 | .protocolParams.rho = 0.1 | .protocolParams.tau = 0.1' "${ROOT}/genesis/shelley/copy2-genesis.json" > "${ROOT}/genesis/shelley/genesis.json"
 
 rm "${ROOT}/genesis/shelley/copy2-genesis.json"

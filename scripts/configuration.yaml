@@ -48,7 +48,7 @@ TurnOnLogging: True
 # Enable the collection of various OS metrics such as memory and CPU use.
 # These metrics are traced in the context name: 'cardano.node.metrics' and can
 # be directed to the logs or monitoring backends.
-TurnOnLogMetrics: True
+TurnOnLogMetrics: False
 
 # Global logging severity filter. Messages must have at least this severity to
 # pass. Typical values would be Warning, Notice, Info or Debug.
@@ -56,7 +56,7 @@ minSeverity: Info
 
 # Log items can be rendered with more or less verbose detail.
 # Verbosity ranges from MinimalVerbosity, NormalVerbosity to MaximalVerbosity
-TracingVerbosity: NormalVerbosity
+TracingVerbosity: MinimalVerbosity
 
 # The system supports a number of backends for logging and monitoring.
 # This setting lists the backends that will be available to use in the
@@ -110,9 +110,9 @@ defaultBackends:
 # The scribe output format can be ScText or ScJson. Log rotation settings can
 # be specified in the defaults below or overridden on a per-scribe basis here.
 setupScribes:
-  - scKind: FileSK
-    scName: "logs/mainnet.log"
-    scFormat: ScText
+  # - scKind: FileSK
+  #   scName: "logs/mainnet.log"
+  #   scFormat: ScText
 
   - scKind: StdoutSK
     scName: stdout
@@ -121,8 +121,8 @@ setupScribes:
 # For the Katip logging backend this specifies the default scribes that trace
 # output is sent to if it is not configured to be sent to other scribes.
 defaultScribes:
-  - - FileSK
-    - "logs/mainnet.log"
+  # - - FileSK
+  #   - "logs/mainnet.log"
   - - StdoutSK
     - stdout
 
@@ -186,7 +186,7 @@ TraceErrorPolicy: True
 TraceLocalErrorPolicy: True
 
 # Trace block forging.
-TraceForge: True
+TraceForge: False
 
 # Trace Handshake protocol messages.
 TraceHandshake: False
@@ -235,7 +235,7 @@ TraceLocalTxSubmissionProtocol: False
 TraceLocalTxSubmissionServer: False
 
 # Trace mempool.
-TraceMempool: True
+TraceMempool: False
 
 # Trace Mux Events.
 TraceMux: False
@@ -269,9 +269,9 @@ options:
 
   # redirects traced values to a specific scribe which is identified by its
   # type and its name, separated by "::":
-  mapScribes:
-    cardano.node.metrics:
-      - "FileSK::logs/mainnet.log"
+  # mapScribes:
+  #   cardano.node.metrics:
+  #     - "FileSK::logs/mainnet.log"
 
   # apply a filter on message severity on messages in a specific named context.
   # this filter is applied additionally to the global 'minSeverity' and thus
@@ -279,3 +279,5 @@ options:
   mapSeverity:
     cardano.node.ChainDB: Notice
     cardano.node.DnsSubscription: Debug
+    cardano.node.LeadershipCheck: Warning
+    cardano.node.resources: Error

@@ -1,6 +1,7 @@
 gardano
-test.env
+*.env
 .vscode/
 devnet/
 pparams.json
 logs/
+notes

@@ -1,4 +1,4 @@
-TAG := ghcr.io/kocubinski/cardano-devnet:0.1.0
+TAG := ghcr.io/kocubinski/cardano-devnet:0.1.1	
 
 devnet:
 	./scripts/bootstrap-devnet.sh
