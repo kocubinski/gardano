@@ -19,7 +19,7 @@ esac
 CARDANO_CLI="${CARDANO_CLI:-cardano-cli}"
 NETWORK_MAGIC=42
 SECURITY_PARAM=10
-NUM_SPO_NODES=2
+NUM_SPO_NODES=1
 INIT_SUPPLY=12000000
 START_TIME="$(${DATE} -d "now + 30 seconds" +%s)"
 ROOT="devnet"
@@ -101,7 +101,8 @@ $CARDANO_CLI legacy genesis create-staked --genesis-dir "${ROOT}" \
   --gen-utxo-keys ${NUM_SPO_NODES}
 
 
-SPO_NODES="node-spo1 node-spo2"
+#SPO_NODES="node-spo1 node-spo2"
+SPO_NODES="node-spo1"
 
 # create the node directories
 for NODE in ${SPO_NODES}; do
@@ -126,56 +127,50 @@ rm "${ROOT}/genesis/byron/genesis-wrong.json"
 
 cp "${ROOT}/genesis/shelley/genesis.json" "${ROOT}/genesis/shelley/copy-genesis.json"
 
-jq -M '. + {slotLength:0.5, securityParam:10, activeSlotsCoeff:0.1, securityParam:10, epochLength:500, maxLovelaceSupply:10000000000000, updateQuorum:2}' "${ROOT}/genesis/shelley/copy-genesis.json" > "${ROOT}/genesis/shelley/copy2-genesis.json"
+jq -M '. + {slotLength:1, securityParam:10, activeSlotsCoeff:1, securityParam:10, epochLength:500, maxLovelaceSupply:10000000000000, updateQuorum:1}' "${ROOT}/genesis/shelley/copy-genesis.json" > "${ROOT}/genesis/shelley/copy2-genesis.json"
 jq --raw-output '.protocolParams.protocolVersion.major = 7 | .protocolParams.minFeeA = 44 | .protocolParams.minFeeB = 155381 | .protocolParams.minUTxOValue = 1000000 | .protocolParams.decentralisationParam = 0.7 | .protocolParams.rho = 0.1 | .protocolParams.tau = 0.1' "${ROOT}/genesis/shelley/copy2-genesis.json" > "${ROOT}/genesis/shelley/genesis.json"
 
 rm "${ROOT}/genesis/shelley/copy2-genesis.json"
 rm "${ROOT}/genesis/shelley/copy-genesis.json"
 
 mv "${ROOT}/pools/vrf1.skey" "${ROOT}/node-spo1/vrf.skey"
-mv "${ROOT}/pools/vrf2.skey" "${ROOT}/node-spo2/vrf.skey"
+#mv "${ROOT}/pools/vrf2.skey" "${ROOT}/node-spo2/vrf.skey"
 
 mv "${ROOT}/pools/opcert1.cert" "${ROOT}/node-spo1/opcert.cert"
-mv "${ROOT}/pools/opcert2.cert" "${ROOT}/node-spo2/opcert.cert"
+#mv "${ROOT}/pools/opcert2.cert" "${ROOT}/node-spo2/opcert.cert"
 
 mv "${ROOT}/pools/kes1.skey" "${ROOT}/node-spo1/kes.skey"
-mv "${ROOT}/pools/kes2.skey" "${ROOT}/node-spo2/kes.skey"
+#mv "${ROOT}/pools/kes2.skey" "${ROOT}/node-spo2/kes.skey"
 
 #Byron related
 
 mv "${ROOT}/byron-gen-command/delegate-keys.000.key" "${ROOT}/node-spo1/byron-delegate.key"
-mv "${ROOT}/byron-gen-command/delegate-keys.001.key" "${ROOT}/node-spo2/byron-delegate.key"
+#mv "${ROOT}/byron-gen-command/delegate-keys.001.key" "${ROOT}/node-spo2/byron-delegate.key"
 
 mv "${ROOT}/byron-gen-command/delegation-cert.000.json" "${ROOT}/node-spo1/byron-delegation.cert"
-mv "${ROOT}/byron-gen-command/delegation-cert.001.json" "${ROOT}/node-spo2/byron-delegation.cert"
+#mv "${ROOT}/byron-gen-command/delegation-cert.001.json" "${ROOT}/node-spo2/byron-delegation.cert"
 
 echo 3001 > "${ROOT}/node-spo1/port"
-echo 3002 > "${ROOT}/node-spo2/port"
+#echo 3002 > "${ROOT}/node-spo2/port"
 
 # Make topology files
 cat > "${ROOT}/node-spo1/topology.json" <<EOF
 {
-   "Producers": [
-     {
-       "addr": "127.0.0.1",
-       "port": 3002,
-       "valency": 1
-     }
-   ]
- }
+   "Producers": []
+}
 EOF
 
-cat > "${ROOT}/node-spo2/topology.json" <<EOF
-{
-   "Producers": [
-     {
-       "addr": "127.0.0.1",
-       "port": 3001,
-       "valency": 1
-     }
-   ]
- }
-EOF
+#cat > "${ROOT}/node-spo2/topology.json" <<EOF
+#{
+#   "Producers": [
+#     {
+#       "addr": "127.0.0.1",
+#       "port": 3001,
+#       "valency": 1
+#     }
+#   ]
+# }
+#EOF
 
 # Generate Test Accounts
 mkdir -p "${ROOT}/accounts"
@@ -218,6 +213,7 @@ echo "" >> "${ROOT}/run/all.sh"
 
 for NODE in ${SPO_NODES}; do
   echo "$ROOT/${NODE}.sh &" >> "${ROOT}/run/all.sh"
+  echo "sleep 5" >> "${ROOT}/run/all.sh"
 done
 
 echo "socat TCP-LISTEN:7007,reuseaddr,fork UNIX-CLIENT:${ROOT}/node-spo1/node.sock" >> "${ROOT}/run/all.sh"
