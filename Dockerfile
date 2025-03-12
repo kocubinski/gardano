@@ -1,5 +1,7 @@
-FROM ghcr.io/intersectmbo/cardano-node:10.1.4
+FROM kocubinski/cardano-node:10.1.4-2-gb329f56dc
 
-COPY devnet /devnet
-WORKDIR /
-ENTRYPOINT ["/devnet/run/all.sh"]
+RUN mkdir /app
+COPY entrypoint.sh /app/entrypoint.sh
+COPY scripts /app/scripts
+WORKDIR /app
+ENTRYPOINT ["/app/entrypoint.sh"]

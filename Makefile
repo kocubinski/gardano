@@ -10,7 +10,7 @@ push:
 	docker push $(TAG)
 
 docker-run: docker-env
-	docker run -it  -p 7007:7007 -v $(PWD)/devnet:/devnet $(TAG)
+	docker run -it -p 7007:7007 -v $(PWD)/devnet:/app/devnet $(TAG)
 
 run: devnet
 	./devnet/run/all.sh
