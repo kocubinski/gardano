@@ -1,4 +1,4 @@
-FROM kocubinski/cardano-node:10.1.4-3-gbd245026a
+FROM kocubinski/cardano-node:10.1.4-4-gee2c96c32
 
 RUN mkdir /app
 COPY entrypoint.sh /app/entrypoint.sh

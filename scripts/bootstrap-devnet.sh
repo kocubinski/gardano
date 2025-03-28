@@ -21,7 +21,7 @@ NETWORK_MAGIC=42
 SECURITY_PARAM=10
 NUM_SPO_NODES=1
 INIT_SUPPLY=12000000
-START_TIME="$(${DATE} -d "now + 30 seconds" +%s)"
+START_TIME="$(${DATE} -d "now + 10 seconds" +%s)"
 ROOT="devnet"
 mkdir -p "${ROOT}"
 
@@ -88,6 +88,10 @@ $SED -i "${ROOT}/configuration.yaml" \
   echo "TestBabbageHardForkAtEpoch: 0" >> "${ROOT}/configuration.yaml"
   echo "TestConwayHardForkAtEpoch: 0" >> "${ROOT}/configuration.yaml"
   echo "ExperimentalProtocolsEnabled: True" >> "${ROOT}/configuration.yaml"
+
+ # TODO: How to increase initial utxo supply? 
+ # --supply            20000000000000 \
+ # --supply-delegated  2500000000000 \
 
 # Because in Babbage the overlay schedule and decentralization parameter
 # are deprecated, we must use the "create-staked" cli command to create

@@ -1,16 +1,21 @@
-TAG := kocubinski/cardano-devnet:0.1.4
+TAG := kocubinski/cardano-devnet:0.1.6
 
 devnet:
 	./scripts/bootstrap-devnet.sh
 
-docker: devnet
+docker: 
 	docker build --tag $(TAG) .
 
 push:
 	docker push $(TAG)
 
+#	-v $(PWD)/devnet:/app/devnet \
+
 docker-run: docker-env
-	docker run -it -p 7007:7007 -v $(PWD)/devnet:/app/devnet $(TAG)
+	docker run -it \
+	-p 7007:7007 \
+	-e FUND_ACCOUNT=addr_test1vr8aq48kt8t8xxkecd6fuvj5zmx8ufaer9eqpt0pz8k9k4cntrghw \
+	$(TAG)
 
 run: devnet
 	./devnet/run/all.sh
