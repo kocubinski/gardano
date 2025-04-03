@@ -140,50 +140,6 @@ func (tb TxBuilder) getTotalInputOutputs() (inputs, outputs uint64) {
 	return
 }
 
-// MinFee calculates the minimum fee for the provided transaction.
-func (tb TxBuilder) MinFee() (fee uint64, err error) {
-	feeTx := Tx{
-		Body: TxBody{
-			Inputs:  tb.tx.Body.Inputs,
-			Outputs: tb.tx.Body.Outputs,
-			Fee:     tb.tx.Body.Fee,
-			TTL:     tb.tx.Body.TTL,
-		},
-		WitnessSet: tb.tx.WitnessSet,
-		Valid:      true,
-		Metadata:   tb.tx.Metadata,
-	}
-	err = feeTx.CalculateAuxiliaryDataHash()
-	if err != nil {
-		return
-	}
-	if feeTx.WitnessSet.VKeys == nil {
-		feeTx.WitnessSet.VKeys = &VKeyWitnessSet{}
-		vWitness := NewVKeyWitness(
-			make([]byte, 32),
-			make([]byte, 64),
-		)
-		feeTx.WitnessSet.VKeys.Append(vWitness)
-	}
-
-	totalI, totalO := tb.getTotalInputOutputs()
-
-	if totalI != (totalO) {
-		// phony address for byte counting
-		inner_addr, err := address.NewAddressFromBech32("addr_test1vplnske8nmg3p02msdwnzf2wsydhuk53q4dykj5jyslmu9chljg73")
-		if err != nil {
-			return 0, err
-		}
-		feeTx.Body.Outputs = append(feeTx.Body.Outputs, NewTxOutput(inner_addr, (totalI-totalO-200000)))
-	}
-	lfee := NewLinearFee(tb.protocol.MinFeeCoefficient, tb.protocol.MinFeeConstant)
-	// The fee may have increased enough to increase the number of bytes, so do one more pass
-	fee, _ = feeTx.Fee(lfee)
-	feeTx.Body.Fee = uint64(fee)
-
-	return
-}
-
 // AddInputs adds inputs to the transaction body
 func (tb *TxBuilder) AddInputs(inputs ...TxInput) {
 	tb.tx.AddInputs(inputs...)
