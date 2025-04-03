@@ -16,6 +16,7 @@ import (
 	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
+	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	"github.com/blinklabs-io/gouroboros/protocol/blockfetch"
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
@@ -23,7 +24,6 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
 	"github.com/cosmos/btcutil/bech32"
 	"github.com/kocubinski/gardano/address"
-	"github.com/kocubinski/gardano/cbor"
 	"github.com/kocubinski/gardano/tx"
 )
 
