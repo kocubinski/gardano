@@ -29,22 +29,30 @@ func (tb *TxBuilder) Build() (tx Tx, err error) {
 		return tx, err
 	}
 
-	// empty witness set to calculate the fee
-	tx.WitnessSet.VKeys = &VKeyWitnessSet{}
-	tx.WitnessSet.VKeys.Append(NewVKeyWitness(make([]byte, 32), make([]byte, 64)))
+	// calculate fee
 
+	// empty witness set for fee calc
+	tx.WitnessSet.VKeys = &VKeyWitnessSet{}
+	for i := 0; i < len(tb.privs); i++ {
+		tx.WitnessSet.VKeys.Append(NewVKeyWitness(make([]byte, 32), make([]byte, 64)))
+	}
+
+	// first pass to estimate size without fee
 	txCbor, err := tx.Bytes()
 	if err != nil {
 		return tx, err
 	}
-	txLength := uint64(len(txCbor))
-	fee := tb.protocol.MinFeeCoefficient*txLength + tb.protocol.MinFeeConstant + 200
-	tx.Body.Fee = fee
-
-	// subtract the fee from the outputs if one is a change address
+	tx.Body.Fee = tb.protocol.MinFeeCoefficient*uint64(len(txCbor)) + tb.protocol.MinFeeConstant
+	// second pass with fee
+	txCbor, err = tx.Bytes()
+	if err != nil {
+		return tx, err
+	}
+	tx.Body.Fee = tb.protocol.MinFeeCoefficient*uint64(len(txCbor)) + tb.protocol.MinFeeConstant
+	// subtract the fee from the outputs if one is a change address; hope this doesn't change size
 	for i, txOut := range tx.Body.Outputs {
 		if txOut.Address.Equals(tb.changeAddr) {
-			txOut.Amount -= fee
+			txOut.Amount -= tx.Body.Fee
 			tx.Body.Outputs[i] = txOut
 			break
 		}
