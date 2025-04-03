@@ -1,6 +1,6 @@
 module github.com/kocubinski/gardano
 
-go 1.24
+go 1.23.6
 
 require (
 	github.com/blinklabs-io/gouroboros v0.110.0
