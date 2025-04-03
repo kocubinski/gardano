@@ -2,31 +2,36 @@ package tx_test
 
 import (
 	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/kocubinski/gardano/address"
-	"github.com/kocubinski/gardano/tx"
+	. "github.com/kocubinski/gardano/tx"
 	"github.com/stretchr/testify/require"
 )
+
+func addrFromBech32(t *testing.T, addrBech32 string) address.Address {
+	addr, err := address.NewAddressFromBech32(addrBech32)
+	require.NoError(t, err)
+	return addr
+}
 
 func Test_TransactionSpec(t *testing.T) {
 	cases := []struct {
 		name string
-		tx   tx.Tx
+		tx   Tx
 		cbor string
 	}{
 		{
 			name: "one input, no outputs",
-			tx: tx.Tx{
-				Body: tx.TxBody{
-					Inputs: tx.TxInputSet{
-						TxIns: []*tx.TxInput{
-							tx.NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
+			tx: Tx{
+				Body: TxBody{
+					Inputs: TxInputSet{
+						TxIns: []TxInput{
+							NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
 						},
 					},
-					Outputs: make([]tx.TxOutput, 0),
+					Outputs: make([]TxOutput, 0),
 				},
 				Valid: true,
 			},
@@ -34,15 +39,15 @@ func Test_TransactionSpec(t *testing.T) {
 		},
 		{
 			name: "one input, one output, fee",
-			tx: tx.Tx{
-				Body: tx.TxBody{
-					Inputs: tx.TxInputSet{
-						TxIns: []*tx.TxInput{
-							tx.NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
+			tx: Tx{
+				Body: TxBody{
+					Inputs: TxInputSet{
+						TxIns: []TxInput{
+							NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
 						},
 					},
-					Outputs: []tx.TxOutput{
-						tx.NewTxOutput(address.MustFromBech32("addr1v9f785wjgm4w0ky6lrjp4ecfj7dunzhql83ratqlpenqn2ssnlkjz"), 2500000),
+					Outputs: []TxOutput{
+						NewTxOutput(addrFromBech32(t, "addr1v9f785wjgm4w0ky6lrjp4ecfj7dunzhql83ratqlpenqn2ssnlkjz"), 2500000),
 					},
 					Fee: 166249,
 				},
@@ -52,16 +57,16 @@ func Test_TransactionSpec(t *testing.T) {
 		},
 		{
 			name: "one input, two outputs, fee",
-			tx: tx.Tx{
-				Body: tx.TxBody{
-					Inputs: tx.TxInputSet{
-						TxIns: []*tx.TxInput{
-							tx.NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
+			tx: Tx{
+				Body: TxBody{
+					Inputs: TxInputSet{
+						TxIns: []TxInput{
+							NewTxInput("086838187822234a2153763a74daea139f29cf8753cb84f6e0c904e1db0ea3ab", 0, 2832783),
 						},
 					},
-					Outputs: []tx.TxOutput{
-						tx.NewTxOutput(address.MustFromBech32("addr1v9f785wjgm4w0ky6lrjp4ecfj7dunzhql83ratqlpenqn2ssnlkjz"), 2500000),
-						tx.NewTxOutput(address.MustFromBech32("addr1v8hc0xl88ehea8698tjejhwjum87hsusdpne787znge7sps4x4v8v"), 166534),
+					Outputs: []TxOutput{
+						NewTxOutput(addrFromBech32(t, "addr1v9f785wjgm4w0ky6lrjp4ecfj7dunzhql83ratqlpenqn2ssnlkjz"), 2500000),
+						NewTxOutput(addrFromBech32(t, "addr1v8hc0xl88ehea8698tjejhwjum87hsusdpne787znge7sps4x4v8v"), 166534),
 					},
 					Fee: 166249,
 				},
@@ -96,11 +101,10 @@ func Test_Metadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, res, lazyValue.Value())
 
-	jsonBytes, err := lazyValue.MarshalJSON()
+	_, err = lazyValue.MarshalJSON()
 	require.NoError(t, err)
-	fmt.Println(string(jsonBytes))
 
-	memo, err := tx.DecodeMemoFromMetadata(lazyValue)
+	memo, err := DecodeMemoFromMetadata(lazyValue)
 	require.NoError(t, err)
 	require.Equal(t, "foo+bar-baz", memo)
 }

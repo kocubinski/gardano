@@ -5,15 +5,15 @@ import (
 	"fmt"
 
 	"github.com/kocubinski/gardano/address"
-	"github.com/kocubinski/gardano/fees"
-	"github.com/kocubinski/gardano/protocol"
+	utxocardano "github.com/utxorpc/go-codegen/utxorpc/v1alpha/cardano"
 )
 
 // TxBuilder - used to create, validate and sign transactions.
 type TxBuilder struct {
-	tx       *Tx
-	privs    []ed25519.PrivateKey
-	protocol *protocol.Protocol
+	tx         *Tx
+	privs      []ed25519.PrivateKey
+	protocol   *utxocardano.PParams
+	changeAddr address.Address
 }
 
 // Sign adds a private key to create signature for witness
@@ -23,11 +23,40 @@ func (tb *TxBuilder) Sign(priv ed25519.PrivateKey) {
 
 // Build creates hash of transaction, signs the hash using supplied witnesses and adds them to the transaction.
 func (tb *TxBuilder) Build() (tx Tx, err error) {
-	hash, err := tb.tx.Hash()
+	tx = *tb.tx
+	hash, err := tx.Hash()
 	if err != nil {
 		return tx, err
 	}
 
+	// empty witness set to calculate the fee
+	tx.WitnessSet.VKeys = &VKeyWitnessSet{}
+	tx.WitnessSet.VKeys.Append(NewVKeyWitness(make([]byte, 32), make([]byte, 64)))
+
+	txCbor, err := tx.Bytes()
+	if err != nil {
+		return tx, err
+	}
+	txLength := uint64(len(txCbor))
+	fee := tb.protocol.MinFeeCoefficient*txLength + tb.protocol.MinFeeConstant + 200
+	tx.Body.Fee = fee
+
+	// subtract the fee from the outputs if one is a change address
+	for i, txOut := range tx.Body.Outputs {
+		if txOut.Address.Equals(tb.changeAddr) {
+			txOut.Amount -= fee
+			tx.Body.Outputs[i] = txOut
+			break
+		}
+	}
+
+	// rehash the transaction with the fee set
+	hash, err = tx.Hash()
+	if err != nil {
+		return tx, err
+	}
+
+	// sign the transaction with the private keys
 	txKeys := []*VKeyWitness{}
 	for _, prv := range tb.privs {
 		publicKey := prv.Public().(ed25519.PublicKey)
@@ -36,14 +65,14 @@ func (tb *TxBuilder) Build() (tx Tx, err error) {
 			return tx, err
 		}
 
-		txKeys = append(txKeys, NewVKeyWitness(publicKey, signature[:]))
+		txKeys = append(txKeys, NewVKeyWitness(publicKey, signature))
 	}
 
-	tb.tx.WitnessSet = NewTXWitness(
+	tx.WitnessSet = NewTXWitness(
 		txKeys...,
 	)
 
-	return *tb.tx, nil
+	return tx, nil
 }
 
 // Tx returns a pointer to the transaction
@@ -53,15 +82,9 @@ func (tb *TxBuilder) Tx() (tx *Tx) {
 
 // AddChangeIfNeeded calculates the excess change from UTXO inputs - outputs and adds it to the transaction body.
 func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) error {
-	// change is amount in utxo minus outputs minus fee
-	minFee, err := tb.MinFee()
-	if err != nil {
-		return err
-	}
-	tb.tx.SetFee(minFee)
+	tb.changeAddr = addr
 	totalI, totalO := tb.getTotalInputOutputs()
-
-	change := totalI - totalO - uint(tb.tx.Body.Fee)
+	change := totalI - totalO - tb.tx.Body.Fee
 	if change > 0 {
 		tb.tx.AddOutputs(
 			NewTxOutput(
@@ -79,14 +102,17 @@ func (tb *TxBuilder) SetTTL(ttl uint32) {
 }
 
 // SetMemo sets the memo for the transaction as specified in https://cips.cardano.org/cip/CIP-20
-func (tb *TxBuilder) SetMemo(memos ...string) error {
-	if len(memos) == 0 {
+func (tb *TxBuilder) SetMemo(memo string) error {
+	if len(memo) == 0 {
 		return nil
 	}
-	for _, m := range memos {
-		if len(m) > 64 {
-			return fmt.Errorf("memo is too long: %d", len(m))
-		}
+	memos := []string{}
+	for len(memo) > 64 {
+		memos = append(memos, memo[:64])
+		memo = memo[64:]
+	}
+	if len(memo) > 0 {
+		memos = append(memos, memo)
 	}
 
 	if tb.tx.Metadata == nil {
@@ -103,19 +129,19 @@ func (tb *TxBuilder) SetMemo(memos ...string) error {
 	return nil
 }
 
-func (tb TxBuilder) getTotalInputOutputs() (inputs, outputs uint) {
+func (tb TxBuilder) getTotalInputOutputs() (inputs, outputs uint64) {
 	for _, inp := range tb.tx.Body.Inputs.TxIns {
 		inputs += inp.Amount
 	}
 	for _, out := range tb.tx.Body.Outputs {
-		outputs += uint(out.Amount)
+		outputs += out.Amount
 	}
 
 	return
 }
 
 // MinFee calculates the minimum fee for the provided transaction.
-func (tb TxBuilder) MinFee() (fee uint, err error) {
+func (tb TxBuilder) MinFee() (fee uint64, err error) {
 	feeTx := Tx{
 		Body: TxBody{
 			Inputs:  tb.tx.Body.Inputs,
@@ -143,20 +169,23 @@ func (tb TxBuilder) MinFee() (fee uint, err error) {
 	totalI, totalO := tb.getTotalInputOutputs()
 
 	if totalI != (totalO) {
-		inner_addr := address.Address("addr_test1qqe6zztejhz5hq0xghlf72resflc4t2gmu9xjlf73x8dpf88d78zlt4rng3ccw8g5vvnkyrvt96mug06l5eskxh8rcjq2wyd63")
+		// phony address for byte counting
+		inner_addr, err := address.NewAddressFromBech32("addr_test1vplnske8nmg3p02msdwnzf2wsydhuk53q4dykj5jyslmu9chljg73")
+		if err != nil {
+			return 0, err
+		}
 		feeTx.Body.Outputs = append(feeTx.Body.Outputs, NewTxOutput(inner_addr, (totalI-totalO-200000)))
 	}
-	lfee := fees.NewLinearFee(tb.protocol.TxFeePerByte, tb.protocol.TxFeeFixed)
+	lfee := NewLinearFee(tb.protocol.MinFeeCoefficient, tb.protocol.MinFeeConstant)
 	// The fee may have increased enough to increase the number of bytes, so do one more pass
 	fee, _ = feeTx.Fee(lfee)
 	feeTx.Body.Fee = uint64(fee)
-	fee, _ = feeTx.Fee(lfee)
 
 	return
 }
 
 // AddInputs adds inputs to the transaction body
-func (tb *TxBuilder) AddInputs(inputs ...*TxInput) {
+func (tb *TxBuilder) AddInputs(inputs ...TxInput) {
 	tb.tx.AddInputs(inputs...)
 }
 
@@ -166,7 +195,7 @@ func (tb *TxBuilder) AddOutputs(outputs ...TxOutput) {
 }
 
 // NewTxBuilder returns pointer to a new TxBuilder.
-func NewTxBuilder(pr *protocol.Protocol, privs []ed25519.PrivateKey) *TxBuilder {
+func NewTxBuilder(pr *utxocardano.PParams, privs []ed25519.PrivateKey) *TxBuilder {
 	return &TxBuilder{
 		tx:       NewTx(),
 		privs:    privs,

@@ -4,58 +4,11 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"reflect"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/kocubinski/gardano/address"
-	"github.com/kocubinski/gardano/fees"
 	"golang.org/x/crypto/blake2b"
 )
-
-var (
-	txDecMode cbor.DecMode
-	txEncMode cbor.EncMode
-)
-
-func init() {
-	// Use signedCWT struct defined in "Decoding CWT" example.
-
-	// Create TagSet (safe for concurrency).
-	tags := cbor.NewTagSet()
-	err := tags.Add(
-		cbor.TagOptions{EncTag: cbor.EncTagRequired, DecTag: cbor.DecTagRequired},
-		reflect.TypeOf(TxInputSet{}),
-		258)
-	if err != nil {
-		panic(err)
-	}
-	// err = tags.Add(
-	// 	cbor.TagOptions{EncTag: cbor.EncTagRequired, DecTag: cbor.DecTagRequired},
-	// 	reflect.TypeOf(WitnessSet{}),
-	// 	258)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// err = tags.Add(
-	// 	cbor.TagOptions{EncTag: cbor.EncTagRequired, DecTag: cbor.DecTagRequired},
-	// 	reflect.TypeOf(VKeyWitnessSet{}),
-	// 	258)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// Create DecMode with immutable tags.
-	txDecMode, err = cbor.DecOptions{}.DecModeWithTags(tags)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create EncMode with immutable tags.
-	txEncMode, err = cbor.EncOptions{}.EncModeWithTags(tags)
-	if err != nil {
-		panic(err)
-	}
-}
 
 type Tx struct {
 	_          struct{} `cbor:",toarray"`
@@ -111,7 +64,7 @@ func (t *Tx) Hash() ([32]byte, error) {
 
 // Fee returns the fee(in lovelaces) required by the transaction from the linear formula
 // fee = txFeeFixed + txFeePerByte*tx_len_in_bytes
-func (t *Tx) Fee(lfee *fees.LinearFee) (uint, error) {
+func (t *Tx) Fee(lfee *LinearFee) (uint64, error) {
 	if err := t.CalculateAuxiliaryDataHash(); err != nil {
 		return 0, err
 	}
@@ -120,14 +73,14 @@ func (t *Tx) Fee(lfee *fees.LinearFee) (uint, error) {
 		return 0, err
 	}
 	txBodyLen := len(txCbor)
-	fee := lfee.TxFeeFixed + lfee.TxFeePerByte*uint(txBodyLen)
+	fee := lfee.TxFeeFixed + lfee.TxFeePerByte*uint64(txBodyLen)
 
 	return fee, nil
 }
 
 // SetFee sets the fee
-func (t *Tx) SetFee(fee uint) {
-	t.Body.Fee = uint64(fee)
+func (t *Tx) SetFee(fee uint64) {
+	t.Body.Fee = fee
 }
 
 func (t *Tx) CalculateAuxiliaryDataHash() error {
@@ -143,7 +96,7 @@ func (t *Tx) CalculateAuxiliaryDataHash() error {
 }
 
 // AddInputs adds the inputs to the transaction body
-func (t *Tx) AddInputs(inputs ...*TxInput) {
+func (t *Tx) AddInputs(inputs ...TxInput) {
 	t.Body.Inputs.TxIns = append(t.Body.Inputs.TxIns, inputs...)
 }
 
@@ -154,7 +107,7 @@ func (t *Tx) AddOutputs(outputs ...TxOutput) {
 
 type TxInputSet struct {
 	cbor.Marshaler
-	TxIns []*TxInput
+	TxIns []TxInput
 }
 
 func (txI *TxInputSet) MarshalCBOR() ([]byte, error) {
@@ -202,14 +155,14 @@ type TxInput struct {
 
 	TxHash []byte
 	Index  uint16
-	Amount uint
+	Amount uint64
 }
 
 // NewTxInput creates and returns a *TxInput from Transaction Hash(Hex Encoded), Transaction Index and Amount.
-func NewTxInput(txHash string, txIx uint16, amount uint) *TxInput {
+func NewTxInput(txHash string, txIx uint16, amount uint64) TxInput {
 	hash, _ := hex.DecodeString(txHash)
 
-	return &TxInput{
+	return TxInput{
 		TxHash: hash,
 		Index:  txIx,
 		Amount: amount,
@@ -232,10 +185,10 @@ func (txI *TxInput) MarshalCBOR() ([]byte, error) {
 type TxOutput struct {
 	_       struct{} `cbor:",toarray"`
 	Address address.Address
-	Amount  uint
+	Amount  uint64
 }
 
-func NewTxOutput(addr address.Address, amount uint) TxOutput {
+func NewTxOutput(addr address.Address, amount uint64) TxOutput {
 	return TxOutput{
 		Address: addr,
 		Amount:  amount,
@@ -299,4 +252,21 @@ type BootstrapWitness struct {
 	Signature  []byte
 	ChainCode  []byte
 	Attributes []byte
+}
+
+// Fees
+
+// LinearFee contains parameters for the linear fee equation `TxFeeFixed + len_bytes(tx) * TxFeePerByte`.
+// These are provided in the protocol parameters
+type LinearFee struct {
+	TxFeePerByte uint64
+	TxFeeFixed   uint64
+}
+
+// NewLinearFee returns a pointer to a new LinearFee from the provided params
+func NewLinearFee(feePerByte uint64, fixedFee uint64) *LinearFee {
+	return &LinearFee{
+		TxFeePerByte: feePerByte,
+		TxFeeFixed:   fixedFee,
+	}
 }

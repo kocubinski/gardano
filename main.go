@@ -13,7 +13,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	ouroboros "github.com/blinklabs-io/gouroboros"
@@ -22,13 +21,15 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	"github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
-	"github.com/blinklabs-io/gouroboros/protocol/localtxsubmission"
-	"github.com/blinklabs-io/gouroboros/protocol/txsubmission"
 	"github.com/gcash/bchutil/bech32"
 	"github.com/kocubinski/gardano/address"
 	"github.com/kocubinski/gardano/cbor"
-	"github.com/kocubinski/gardano/protocol"
 	"github.com/kocubinski/gardano/tx"
+)
+
+const (
+	testnetMagic = 42
+	mainnetMagic = 764824073
 )
 
 // 1 input 1 output tx fee:
@@ -48,10 +49,9 @@ type cliFlags struct {
 
 	// Tx submission
 	receiverAddress string
-	pparams         string
-	sendAmount      uint
+	sendAmount      uint64
 	memo            string
-	fee             uint
+	fee             uint64
 
 	// chain sync
 	filterAddresses string
@@ -79,14 +79,13 @@ func main() {
 	switch command {
 	case "send-tx":
 		f.flagset.StringVar(&f.receiverAddress, "receiver-address", "", "Address to send to")
-		f.flagset.StringVar(&f.pparams, "protocol-parameters-file", "", "Path to protocol parameters file")
-		f.flagset.UintVar(&f.sendAmount, "amount", 0, "Amount to send")
+		f.flagset.Uint64Var(&f.sendAmount, "amount", 0, "Amount to send")
 		f.flagset.StringVar(&f.clientAddress, "address", "", "TCP address for n2c communication")
 		f.flagset.StringVar(&f.clientSocket, "socket", "", "unix socket address for n2c communication")
 		f.flagset.StringVar(&f.memo, "memo", "", "optional tx memo")
-		f.flagset.UintVar(&f.fee, "fee", 0, "if unset fees are dynamically calculated")
+		f.flagset.Uint64Var(&f.fee, "fee", 0, "if unset fees are dynamically calculated")
 		var networkMagic uint
-		f.flagset.UintVar(&networkMagic, "magic", 764824073, "network magic")
+		f.flagset.UintVar(&networkMagic, "magic", testnetMagic, "network magic")
 		parseFlags()
 		f.networkMagic = uint32(networkMagic)
 		err = sendTx(f)
@@ -99,7 +98,7 @@ func main() {
 	case "key-pair":
 		f.flagset.StringVar(&f.seed, "seed", "", "random seed for key pair")
 		var networkMagic uint
-		f.flagset.UintVar(&networkMagic, "magic", 764824073, "network magic")
+		f.flagset.UintVar(&networkMagic, "magic", testnetMagic, "network magic")
 		parseFlags()
 		f.networkMagic = uint32(networkMagic)
 		err = makeKeyPair(f)
@@ -115,9 +114,6 @@ func main() {
 
 var (
 	ouroborosConnection *ouroboros.Connection
-	shutdownWait        sync.WaitGroup
-	// startHash           = "5baf72ec3430f0f65b5b7356d2b15720e451ac6593652bcbea4dd60a1ab99ebd"
-	// startSlot           = uint64(148785568)
 )
 
 func makeKeyPair(f *cliFlags) error {
@@ -135,9 +131,9 @@ func makeKeyPair(f *cliFlags) error {
 	var addr address.Address
 	switch f.networkMagic {
 	case 764824073:
-		addr, err = address.NewMainnetPaymentOnlyFromPubkey(pub)
+		addr, err = address.PaymentOnlyMainnetAddressFromPubkey(pub)
 	case 42:
-		addr, err = address.NewTestnetPaymentOnlyFromPubkey(pub)
+		addr, err = address.PaymentOnlyTestnetAddressFromPubkey(pub)
 	default:
 		return fmt.Errorf("unknown network magic: %d", f.networkMagic)
 	}
@@ -192,9 +188,6 @@ func sendTx(f *cliFlags) error {
 	if f.clientAddress == "" && f.clientSocket == "" {
 		return fmt.Errorf("client address/socket is not set")
 	}
-	if f.pparams == "" {
-		return fmt.Errorf("protocol parameters file is not set")
-	}
 	if f.sendAmount == 0 {
 		return fmt.Errorf("send amount is not set")
 	}
@@ -209,9 +202,9 @@ func sendTx(f *cliFlags) error {
 	pub := priv.Public().(ed25519.PublicKey)
 	var sourceAddr address.Address
 	if f.networkMagic == 42 {
-		sourceAddr, err = address.NewTestnetPaymentOnlyFromPubkey(pub)
+		sourceAddr, err = address.PaymentOnlyTestnetAddressFromPubkey(pub)
 	} else {
-		sourceAddr, err = address.NewMainnetPaymentOnlyFromPubkey(pub)
+		sourceAddr, err = address.PaymentOnlyMainnetAddressFromPubkey(pub)
 	}
 	if err != nil {
 		return err
@@ -220,11 +213,6 @@ func sendTx(f *cliFlags) error {
 	if err != nil {
 		return fmt.Errorf("failed to create address: %w", err)
 	}
-	pparams, err := protocol.LoadProtocol(f.pparams)
-	if err != nil {
-		return fmt.Errorf("failed to load protocol parameters: %w", err)
-	}
-	txBuilder := tx.NewTxBuilder(pparams, []ed25519.PrivateKey{priv})
 
 	errorChan := make(chan error)
 	go func() {
@@ -256,34 +244,38 @@ func sendTx(f *cliFlags) error {
 		ouroboros.WithLogger(log),
 		ouroboros.WithNetwork(network),
 		ouroboros.WithLocalStateQueryConfig(localstatequery.NewConfig()),
-		ouroboros.WithLocalTxSubmissionConfig(
-			localtxsubmission.NewConfig(
-				localtxsubmission.WithSubmitTxFunc(localSubmitTxCallbackHandler),
-			),
-		),
 		ouroboros.WithKeepAlive(true),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to network: %w", err)
 	}
+	pparams, err := o.LocalStateQuery().Client.GetCurrentProtocolParams()
+	if err != nil {
+		return fmt.Errorf("failed to load protocol parameters: %w", err)
+	}
+	txBuilder := tx.NewTxBuilder(pparams.Utxorpc(), []ed25519.PrivateKey{priv})
+
 	utxoRes, err := o.LocalStateQuery().Client.GetUTxOByAddress([]ledger.Address{addr})
 	if err != nil {
 		return fmt.Errorf("failed to get utxo: %w", err)
 	}
 
-	estimatedFee := uint(167217)
+	estimatedFee := uint64(167217)
 	if f.fee > 0 {
 		estimatedFee = f.fee
 	}
 	minRequired := f.sendAmount + estimatedFee // estimate fee
-	txIns, err := maxNumberUTxOs(utxoRes, minRequired)
+	txIns, err := maxNumberUTxOs(utxoRes, uint64(minRequired))
 	if err != nil {
 		return err
 	}
 	txBuilder.AddInputs(txIns...)
 
-	sendAmount := f.sendAmount
-	txBuilder.AddOutputs(tx.NewTxOutput(address.MustFromBech32(f.receiverAddress), sendAmount))
+	toAddr, err := address.NewAddressFromBech32(f.receiverAddress)
+	if err != nil {
+		return fmt.Errorf("failed to create address: %w", err)
+	}
+	txBuilder.AddOutputs(tx.NewTxOutput(toAddr, f.sendAmount))
 
 	tip, err := o.ChainSync().Client.GetCurrentTip()
 	if err != nil {
@@ -291,8 +283,6 @@ func sendTx(f *cliFlags) error {
 	}
 	txBuilder.SetTTL(uint32(tip.Point.Slot + 300))
 
-	// if fee is set assume we're consuming the whole tx (not really correct, only for testing)
-	txBuilder.Tx().SetFee(f.fee)
 	if err := txBuilder.AddChangeIfNeeded(sourceAddr); err != nil {
 		return fmt.Errorf("failed to add change: %w", err)
 	}
@@ -316,7 +306,6 @@ func sendTx(f *cliFlags) error {
 		return fmt.Errorf("failed to json marshal transaction: %w", err)
 	}
 	fmt.Printf("txFinal:\n%s\n", jsonBz)
-	shutdownWait.Add(1)
 
 	era, err := o.LocalStateQuery().Client.GetCurrentEra()
 	if err != nil {
@@ -326,7 +315,6 @@ func sendTx(f *cliFlags) error {
 	if err != nil {
 		return fmt.Errorf("failed to submit transaction: %w", err)
 	}
-	shutdownWait.Wait()
 
 	return nil
 }
@@ -415,13 +403,6 @@ func buildChainSyncConfig() chainsync.Config {
 func buildBlockFetchConfig() blockfetch.Config {
 	return blockfetch.NewConfig(
 		blockfetch.WithBlockFunc(blockFetchBlockHandler),
-	)
-}
-
-func buildTxSubmissionConfig() txsubmission.Config {
-	return txsubmission.NewConfig(
-		txsubmission.WithRequestTxsFunc(txSubmissionRequestHandler),
-		txsubmission.WithRequestTxIdsFunc(txSubmissionIdsRequestHandler),
 	)
 }
 
@@ -541,33 +522,6 @@ func chainSyncRollBackwardHandler(
 	return nil
 }
 
-func txSubmissionRequestHandler(
-	ctx txsubmission.CallbackContext, txs []txsubmission.TxId,
-) ([]txsubmission.TxBody, error) {
-	fmt.Printf("Request TxIds count=%d\n", len(txs))
-	for _, tx := range txs {
-		fmt.Printf("TxId: %x\n", tx)
-	}
-	return []txsubmission.TxBody{}, nil
-}
-
-func txSubmissionIdsRequestHandler(
-	ctx txsubmission.CallbackContext, blocking bool, count uint16, size uint16,
-) ([]txsubmission.TxIdAndSize, error) {
-	fmt.Printf("txRequest: blocking=%t count=%d size=%d\n", blocking, count, size)
-	return []txsubmission.TxIdAndSize{}, nil
-}
-
-func localSubmitTxCallbackHandler(
-	ctx localtxsubmission.CallbackContext,
-	msg localtxsubmission.MsgSubmitTxTransaction,
-) error {
-	fmt.Printf("localSubmitTxCallbackHandler: era=%x\n", msg.EraId)
-	time.Sleep(5 * time.Second)
-	shutdownWait.Done()
-	return nil
-}
-
 func createClientConnection(address string, useTls bool) (net.Conn, error) {
 	if useTls {
 		return tls.Dial("tcp", address, nil)
@@ -576,14 +530,14 @@ func createClientConnection(address string, useTls bool) (net.Conn, error) {
 	}
 }
 
-func maxNumberUTxOs(utxoRes *localstatequery.UTxOByAddressResult, targetAmount uint) ([]*tx.TxInput, error) {
-	var txIns []*tx.TxInput
+func maxNumberUTxOs(utxoRes *localstatequery.UTxOByAddressResult, targetAmount uint64) ([]tx.TxInput, error) {
+	var txIns []tx.TxInput
 	for txId, txOut := range utxoRes.Results {
-		txIn := tx.NewTxInput(txId.Hash.String(), uint16(txId.Idx), uint(txOut.Amount()))
+		txIn := tx.NewTxInput(txId.Hash.String(), uint16(txId.Idx), txOut.Amount())
 		txIns = append(txIns, txIn)
 		fmt.Printf("txId: %s, txOut: %d\n", txId.Hash.String(), txOut.Amount())
 	}
-	slices.SortFunc(txIns, func(a, b *tx.TxInput) int {
+	slices.SortFunc(txIns, func(a, b tx.TxInput) int {
 		switch {
 		case a.Amount < b.Amount:
 			return -1
@@ -594,7 +548,7 @@ func maxNumberUTxOs(utxoRes *localstatequery.UTxOByAddressResult, targetAmount u
 		}
 	})
 
-	var res []*tx.TxInput
+	var res []tx.TxInput
 	for _, txIn := range txIns {
 		res = append(res, txIn)
 		if txIn.Amount > targetAmount {

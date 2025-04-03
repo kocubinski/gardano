@@ -2,7 +2,7 @@
 
 set -o errexit 
 
-FUND_AMOUNT=${FUND_AMOUNT:-100000000000}
+FUND_AMOUNT=${FUND_AMOUNT:-1500000000000}
 
 if [ ! -f devnet/node-spo1.sh ]; then
     echo "Socket not found. Generating devnet config..."

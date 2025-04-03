@@ -3,7 +3,6 @@ package tx
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"math"
 )
 
@@ -18,7 +17,6 @@ const (
 
 // encodeHead writes CBOR head of specified type t and returns number of bytes written.
 func encodeHead(e *bytes.Buffer, t byte, n uint64) int {
-	fmt.Printf("encodeHead: t=%d, n=%d\n", t, n)
 	if n <= maxAdditionalInformationWithoutArgument {
 		const headSize = 1
 		e.WriteByte(t | byte(n))

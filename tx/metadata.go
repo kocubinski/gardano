@@ -2,6 +2,7 @@ package tx
 
 import (
 	"fmt"
+
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 )
@@ -23,25 +24,48 @@ func DecodeMemoFromMetadata(val *cbor.LazyValue) (string, error) {
 			return "", err
 		}
 	}
-	md, ok := val.Value().(map[any]any)
-	if !ok {
-		return "", fmt.Errorf("failed to cast metadata to map[any]any")
+
+	var md map[any]any
+	switch v := val.Value().(type) {
+	case map[any]any:
+		md = v
+	case cbor.Map:
+		md = map[any]any(v)
+	case []any:
+		// ignore this case
+		return "", nil
+	default:
+		return "", fmt.Errorf("failed to cast metadata want: map[any]any got: %T", val.Value())
 	}
-	envelope, ok := md[uint64(674)].(map[any]any)
+
+	x, ok := md[uint64(674)]
 	if !ok {
-		return "", fmt.Errorf("failed to cast metadata envelope to map[any]any")
+		return "", nil
 	}
-	anyMsgs, ok := envelope["msg"].([]any)
+	envelope, ok := x.(map[any]any)
 	if !ok {
-		return "", fmt.Errorf("failed to cast metadata envelope msg to []string")
+		return "", fmt.Errorf("failed to cast metadata envelope want: map[any]any got: %T", x)
 	}
-	var memo string
-	for _, anyMsg := range anyMsgs {
-		msg, ok := anyMsg.(string)
-		if !ok {
-			return "", fmt.Errorf("failed to cast metadata envelope msg to string")
+	x, ok = envelope["msg"]
+	if !ok {
+		return "", nil
+	}
+
+	switch v := x.(type) {
+	case string:
+		return v, nil
+	case []any:
+		var memo string
+		for _, anyMsg := range v {
+			msg, ok := anyMsg.(string)
+			if !ok {
+				return "", fmt.Errorf("failed to cast memo want: string got: %T", anyMsg)
+			}
+			memo += msg
 		}
-		memo += msg
+		return memo, nil
+	default:
+		return "", fmt.Errorf("unknown memo type %T", x)
 	}
-	return memo, nil
+
 }
