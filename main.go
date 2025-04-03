@@ -21,7 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/protocol/chainsync"
 	"github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/gouroboros/protocol/localstatequery"
-	"github.com/gcash/bchutil/bech32"
+	"github.com/cosmos/btcutil/bech32"
 	"github.com/kocubinski/gardano/address"
 	"github.com/kocubinski/gardano/cbor"
 	"github.com/kocubinski/gardano/tx"
