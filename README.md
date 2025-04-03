@@ -1,10 +1,20 @@
 # gardano
 
-Gardano is an implements a very small subset of the Cardano transaction protocol. Also included
-in this project is a docker image that can be used to run a Cardano node. This image is based on
-the official Cardano image.
+Gardano implements a very small subset of Cardano's transaction protocol. Currently supported by the API are:
 
-See main.go for usage.
+- Payment-only address construction for mainnet and testnets (see CIP-19)
+- CIP-20 metadata
+- Transaction CBOR encoding
+- Transaction signing
+- Change and fee calculation
+- TTL
+
+To test this library, a local Cardano node can be started locally if the cardano binaries are
+installed with `make run`, or by the docker image produced with `make docker` if not.  The docker image is built from a fork of the official Cardno node with a few extra utilities.
+
+See main.go for examples, which demonstrates the usage of github.com/blinklabs-io/gouroboros to
+communicate with a running Cardano node via n2c for transaction submission, querying, and
+synchronization.  
 
 ## Example
 
