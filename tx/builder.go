@@ -92,7 +92,7 @@ func (tb *TxBuilder) Tx() (tx *Tx) {
 func (tb *TxBuilder) AddChangeIfNeeded(addr address.Address) error {
 	tb.changeAddr = addr
 	totalI, totalO := tb.getTotalInputOutputs()
-	change := totalI - totalO - tb.tx.Body.Fee
+	change := totalI - totalO
 	if change > 0 {
 		tb.tx.AddOutputs(
 			NewTxOutput(
