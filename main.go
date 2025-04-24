@@ -253,7 +253,7 @@ func sendTx(f *cliFlags) error {
 	if err != nil {
 		return fmt.Errorf("failed to load protocol parameters: %w", err)
 	}
-	txBuilder := tx.NewTxBuilder(pparams.Utxorpc(), []ed25519.PrivateKey{priv})
+	txBuilder := tx.NewTxBuilder(pparams.Utxorpc())
 
 	utxoRes, err := o.LocalStateQuery().Client.GetUTxOByAddress([]ledger.Address{addr})
 	if err != nil {
@@ -293,7 +293,10 @@ func sendTx(f *cliFlags) error {
 			return fmt.Errorf("failed to set memo: %w", err)
 		}
 	}
-	txFinal, err := txBuilder.Build()
+	if err = txBuilder.CalculateFee(); err != nil {
+		return fmt.Errorf("failed to calculate fee: %w", err)
+	}
+	txFinal, err := txBuilder.Sign([]ed25519.PrivateKey{priv})
 	if err != nil {
 		return fmt.Errorf("failed to build transaction: %w", err)
 	}

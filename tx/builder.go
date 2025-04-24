@@ -10,63 +10,59 @@ import (
 
 // TxBuilder - used to create, validate and sign transactions.
 type TxBuilder struct {
-	tx         *Tx
-	privs      []ed25519.PrivateKey
-	protocol   *utxocardano.PParams
-	changeAddr address.Address
+	tx           *Tx
+	witnessCount int
+	protocol     *utxocardano.PParams
+	changeAddr   address.Address
 }
 
-// Sign adds a private key to create signature for witness
-func (tb *TxBuilder) Sign(priv ed25519.PrivateKey) {
-	tb.privs = append(tb.privs, priv)
-}
-
-// Build creates hash of transaction, signs the hash using supplied witnesses and adds them to the transaction.
-func (tb *TxBuilder) Build() (tx Tx, err error) {
-	tx = *tb.tx
-	hash, err := tx.Hash()
-	if err != nil {
-		return tx, err
+func (tb *TxBuilder) CalculateFee() error {
+	if _, err := tb.tx.Hash(); err != nil {
+		return fmt.Errorf("failed to calculate hash: %w", err)
 	}
 
-	// calculate fee
-
 	// empty witness set for fee calc
-	tx.WitnessSet.VKeys = &VKeyWitnessSet{}
-	for i := 0; i < len(tb.privs); i++ {
-		tx.WitnessSet.VKeys.Append(NewVKeyWitness(make([]byte, 32), make([]byte, 64)))
+	tb.tx.WitnessSet.VKeys = &VKeyWitnessSet{}
+	for range tb.witnessCount {
+		tb.tx.WitnessSet.VKeys.Append(NewVKeyWitness(make([]byte, 32), make([]byte, 64)))
 	}
 
 	// first pass to estimate size without fee
-	txCbor, err := tx.Bytes()
+	txCbor, err := tb.tx.Bytes()
 	if err != nil {
-		return tx, err
+		return err
 	}
-	tx.Body.Fee = tb.protocol.MinFeeCoefficient*uint64(len(txCbor)) + tb.protocol.MinFeeConstant
+	tb.tx.Body.Fee = tb.protocol.MinFeeCoefficient*uint64(len(txCbor)) + tb.protocol.MinFeeConstant
 	// second pass with fee
-	txCbor, err = tx.Bytes()
+	txCbor, err = tb.tx.Bytes()
 	if err != nil {
-		return tx, err
+		return err
 	}
-	tx.Body.Fee = tb.protocol.MinFeeCoefficient*uint64(len(txCbor)) + tb.protocol.MinFeeConstant
+	tb.tx.Body.Fee = tb.protocol.MinFeeCoefficient*uint64(len(txCbor)) + tb.protocol.MinFeeConstant
 	// subtract the fee from the outputs if one is a change address; hope this doesn't change size
-	for i, txOut := range tx.Body.Outputs {
+	for i, txOut := range tb.tx.Body.Outputs {
 		if txOut.Address.Equals(tb.changeAddr) {
-			txOut.Amount -= tx.Body.Fee
-			tx.Body.Outputs[i] = txOut
+			txOut.Amount -= tb.tx.Body.Fee
+			tb.tx.Body.Outputs[i] = txOut
 			break
 		}
 	}
 
-	// rehash the transaction with the fee set
-	hash, err = tx.Hash()
+	return nil
+}
+
+// Returns a transaction signed by the provided private keys.
+func (tb *TxBuilder) Sign(privateKeys []ed25519.PrivateKey) (tx Tx, err error) {
+	tx = *tb.tx
+
+	hash, err := tx.Hash()
 	if err != nil {
 		return tx, err
 	}
 
 	// sign the transaction with the private keys
 	txKeys := []*VKeyWitness{}
-	for _, prv := range tb.privs {
+	for _, prv := range privateKeys {
 		publicKey := prv.Public().(ed25519.PublicKey)
 		signature, err := prv.Sign(nil, hash[:], &ed25519.Options{})
 		if err != nil {
@@ -159,10 +155,22 @@ func (tb *TxBuilder) AddOutputs(outputs ...TxOutput) {
 }
 
 // NewTxBuilder returns pointer to a new TxBuilder.
-func NewTxBuilder(pr *utxocardano.PParams, privs []ed25519.PrivateKey) *TxBuilder {
-	return &TxBuilder{
-		tx:       NewTx(),
-		privs:    privs,
-		protocol: pr,
+func NewTxBuilder(pr *utxocardano.PParams, opts ...TxBuilderOption) *TxBuilder {
+	builder := &TxBuilder{
+		tx:           NewTx(),
+		witnessCount: 1,
+		protocol:     pr,
+	}
+	for _, opt := range opts {
+		opt(builder)
+	}
+	return builder
+}
+
+type TxBuilderOption func(*TxBuilder)
+
+func WithWitnessCount(count int) TxBuilderOption {
+	return func(tb *TxBuilder) {
+		tb.witnessCount = count
 	}
 }
